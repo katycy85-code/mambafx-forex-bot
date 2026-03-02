@@ -1,0 +1,45 @@
+{
+  "name": "mambafx-forex-bot",
+  "version": "1.0.0",
+  "description": "MambafX Forex Scalping Bot Platform - Automated trading with NY open strategy",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node server/index.js",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "lint": "eslint .",
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "axios": "^1.4.0",
+    "ccxt": "^3.0.0",
+    "sqlite3": "^5.1.6",
+    "sqlite": "^5.0.1",
+    "twilio": "^3.78.0",
+    "chart.js": "^4.3.0",
+    "date-fns": "^2.30.0",
+    "uuid": "^9.0.0",
+    "ws": "^8.13.0",
+    "simple-statistics": "^7.8.3"
+  },
+  "devDependencies": {
+    "vite": "^4.3.9",
+    "@vitejs/plugin-react": "^4.0.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^3.3.2",
+    "postcss": "^8.4.24",
+    "autoprefixer": "^10.4.14",
+    "vitest": "^0.34.1",
+    "@testing-library/react": "^14.0.0",
+    "eslint": "^8.44.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
