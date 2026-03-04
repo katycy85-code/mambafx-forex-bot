@@ -33,6 +33,14 @@ async function initializeServer() {
     await db.initializeDatabase();
     console.log('✅ Database initialized');
 
+    // Debug: Log environment variables
+    console.log('Environment variables:', {
+      TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID ? 'SET' : 'MISSING',
+      TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN ? 'SET' : 'MISSING',
+      TWILIO_PHONE_NUMBER: process.env.TWILIO_PHONE_NUMBER ? 'SET' : 'MISSING',
+      USER_PHONE_NUMBER: process.env.USER_PHONE_NUMBER ? 'SET' : 'MISSING',
+    });
+
     // Initialize bot engine
     botEngine = new BotEngine({
       fxopenApiKey: process.env.FXOPEN_API_KEY,

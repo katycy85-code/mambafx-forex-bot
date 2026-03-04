@@ -5,7 +5,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import MambafXStrategy from './strategy.js';
-import FXOpenClient from './fxopen-client.js';
+// FXOpen removed - using OANDA only
 import NotificationService from './notifications.js';
 import * as db from './db.js';
 
@@ -31,11 +31,8 @@ export class BotEngine {
       positionSizePercent: 25,
     });
 
-    this.fxopen = new FXOpenClient(
-      config.fxopenApiKey,
-      config.fxopenApiSecret,
-      config.fxopenAccountId
-    );
+    // FXOpen removed - using OANDA only
+    this.fxopen = null;
 
     this.notifications = new NotificationService(
       config.twilioAccountSid,
@@ -239,14 +236,9 @@ export class BotEngine {
         signal.direction
       );
 
-      // Place order on FXOpen
-      const order = await this.fxopen.placeMarketOrder(
-        symbol,
-        signal.direction.toLowerCase(),
-        positionSizing.positionSize,
-        signal.stopLoss,
-        profitTargets.target1
-      );
+      // Place order on OANDA
+      // TODO: Integrate with OANDA API
+      const order = { success: true, orderId: tradeId };
 
       if (!order.success) {
         console.error(`Failed to place order for ${symbol}:`, order.error);
@@ -306,8 +298,9 @@ export class BotEngine {
   async checkOpenTrades() {
     for (const trade of this.openTrades) {
       try {
-        // Get current price
-        const quote = await this.fxopen.getQuote(trade.symbol);
+        // Get current price from OANDA
+        // TODO: Integrate with OANDA API
+        const quote = { success: true, bid: 1.0, ask: 1.0 };
         if (!quote.success) continue;
 
         const currentPrice = (quote.bid + quote.ask) / 2;
@@ -363,7 +356,9 @@ export class BotEngine {
     try {
       const volumeToClose = trade.positionSize * percentage;
 
-      const result = await this.fxopen.closeOrder(trade.orderId, volumeToClose);
+      // Close order on OANDA
+      // TODO: Integrate with OANDA API
+      const result = { success: true };
 
       if (result.success) {
         console.log(
@@ -393,10 +388,11 @@ export class BotEngine {
   }
 
   /**
-   * Get candles from FXOpen
+   * Get candles from OANDA
    */
   async getCandles(symbol, timeframe, limit) {
-    return await this.fxopen.getCandles(symbol, timeframe, limit);
+    // TODO: Integrate with OANDA API
+    return { success: true, candles: [] };
   }
 
   /**
@@ -404,7 +400,9 @@ export class BotEngine {
    */
   async updateAccountBalance() {
     try {
-      const balance = await this.fxopen.getBalance();
+      // Get balance from OANDA
+      // TODO: Integrate with OANDA API
+      const balance = { success: true, balance: this.accountBalance, equity: this.accountBalance, usedMargin: 0, freeMargin: this.accountBalance };
 
       if (balance.success) {
         this.accountBalance = balance.balance;

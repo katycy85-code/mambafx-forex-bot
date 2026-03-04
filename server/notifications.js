@@ -7,6 +7,15 @@ import twilio from 'twilio';
 
 export class NotificationService {
   constructor(accountSid, authToken, fromNumber) {
+    // Validate credentials
+    if (!accountSid || !authToken || !fromNumber) {
+      console.error('Missing Twilio credentials:', {
+        accountSid: accountSid ? 'provided' : 'MISSING',
+        authToken: authToken ? 'provided' : 'MISSING',
+        fromNumber: fromNumber ? 'provided' : 'MISSING',
+      });
+      throw new Error(`Twilio credentials missing: accountSid=${!!accountSid}, authToken=${!!authToken}, fromNumber=${!!fromNumber}`);
+    }
     this.client = twilio(accountSid, authToken);
     this.fromNumber = fromNumber;
   }
