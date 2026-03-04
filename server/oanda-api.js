@@ -50,8 +50,9 @@ export class OandaAPI {
    */
   async getPrice(pair) {
     try {
+      const oandaPair = pair.replace('/', '_');
       const response = await fetch(
-        `${this.apiUrl}/v3/instruments/${pair}/candles?count=1&granularity=M1`,
+        `${this.apiUrl}/v3/instruments/${oandaPair}/candles?count=1&granularity=M1`,
         { headers: this.headers }
       );
 
@@ -80,8 +81,9 @@ export class OandaAPI {
    */
   async getCandles(pair, granularity = 'M5', count = 100) {
     try {
+      const oandaPair = pair.replace('/', '_');
       const response = await fetch(
-        `${this.apiUrl}/v3/instruments/${pair}/candles?count=${count}&granularity=${granularity}`,
+        `${this.apiUrl}/v3/instruments/${oandaPair}/candles?count=${count}&granularity=${granularity}`,
         { headers: this.headers }
       );
 
@@ -140,9 +142,10 @@ export class OandaAPI {
           : price.bid + (stopLossPips * pipsValue);
       }
 
+      const oandaPair = pair.replace('/', '_');
       const orderData = {
         order: {
-          instrument: pair,
+          instrument: oandaPair,
           units: units.toString(),
           type: 'MARKET',
           takeProfitOnFill: takeProfit ? { price: takeProfit.toFixed(5) } : undefined,
