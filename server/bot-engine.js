@@ -133,22 +133,22 @@ export class BotEngine {
    */
   async analyzeAndTrade(symbol) {
     try {
-      // Get 4H and 1M candles
-      const candles4H = await this.getCandles(symbol, '4h', 50);
-      const candles1M = await this.getCandles(symbol, '1m', 100);
+      // Get 15M (for bias) and 5M (for entry) candles - MambafX approach
+      const candles15M = await this.getCandles(symbol, '15m', 50);
+      const candles5M = await this.getCandles(symbol, '5m', 100);
 
-      if (!candles4H.success || !candles1M.success) {
+      if (!candles15M.success || !candles5M.success) {
         console.log(`Failed to get candles for ${symbol}`);
         return;
       }
 
-      // Analyze bias
-      const bias = this.strategy.analyzeBias(candles4H.candles);
+      // Analyze bias from 15M
+      const bias = this.strategy.analyzeBias(candles15M.candles);
 
       // Check if should skip
       const shouldSkip = this.strategy.shouldSkipTrade(
-        candles4H.candles,
-        candles1M.candles,
+        candles15M.candles,
+        candles5M.candles,
         bias
       );
 
@@ -157,10 +157,10 @@ export class BotEngine {
         return;
       }
 
-      // Generate entry signal
+      // Generate entry signal from 5M
       const signal = this.strategy.generateEntrySignal(
-        candles4H.candles,
-        candles1M.candles,
+        candles15M.candles,
+        candles5M.candles,
         bias
       );
 
