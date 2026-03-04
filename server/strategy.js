@@ -349,6 +349,50 @@ export class MambafXStrategy {
   }
 
   /**
+   * Detect choppy/sideways market (no clear direction)
+   */
+  detectChop(candles, lookback = 10) {
+    if (!candles || candles.length < lookback) {
+      return { isChopping: false, reason: 'Insufficient data' };
+    }
+
+    const recent = candles.slice(-lookback);
+    const closes = recent.map(c => c.close);
+    const highs = recent.map(c => c.high);
+    const lows = recent.map(c => c.low);
+    const volumes = recent.map(c => c.volume || 0);
+
+    // Calculate range (high - low)
+    const ranges = highs.map((h, i) => h - lows[i]);
+    const avgRange = ranges.reduce((a, b) => a + b, 0) / ranges.length;
+
+    // Check if price is moving sideways (small range)
+    const currentRange = highs[highs.length - 1] - lows[lows.length - 1];
+    const rangeRatio = currentRange / avgRange;
+
+    // Check if volume is low
+    const currentVolume = volumes[volumes.length - 1];
+    const avgVolume = volumes.slice(0, -1).reduce((a, b) => a + b, 0) / (volumes.length - 1);
+    const volumeRatio = currentVolume / avgVolume;
+
+    // Check if price is choppy (no clear direction)
+    const priceRange = Math.max(...closes) - Math.min(...closes);
+    const priceMovement = Math.abs(closes[closes.length - 1] - closes[0]);
+    const choppyRatio = priceMovement / (priceRange || 1);
+
+    // Chop if: small range + low volume + no clear direction
+    const isChopping = rangeRatio < 0.8 && volumeRatio < 1.0 && choppyRatio < 0.5;
+
+    return {
+      isChopping,
+      rangeRatio,
+      volumeRatio,
+      choppyRatio,
+      reason: isChopping ? 'Market is choppy with low volume' : 'Market has clear direction',
+    };
+  }
+
+  /**
    * Check volume against average (volume filter)
    */
   checkVolume(candles1M, lookback = 20) {

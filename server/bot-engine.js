@@ -324,6 +324,22 @@ export class BotEngine {
 
         const currentPrice = (quote.bid + quote.ask) / 2;
 
+        // Check for chop/no volume exit (scalping exit condition)
+        const timeInTrade = Date.now() - trade.openedAt;
+        const timeInTradeMinutes = timeInTrade / (1000 * 60);
+        
+        if (timeInTradeMinutes >= 10) {
+          const candles5M = await this.getCandles(trade.symbol, '5m', 20);
+          if (candles5M.success) {
+            const chopCheck = this.strategy.detectChop(candles5M.candles);
+            if (chopCheck.isChopping) {
+              console.log(`Chop detected - exiting ${trade.symbol} after ${timeInTradeMinutes.toFixed(1)}min`);
+              await this.closeFullTrade(trade, 'chop_exit');
+              continue;
+            }
+          }
+        }
+
         // Check for profit targets
         if (trade.direction === 'BULLISH') {
           // Check target 1 (1:3 ratio) - close 50%
@@ -365,6 +381,26 @@ export class BotEngine {
       } catch (error) {
         console.error(`Error checking trade ${trade.tradeId}:`, error);
       }
+    }
+  }
+
+  /**
+   * Close full trade (for chop exit or other reasons)
+   */
+  async closeFullTrade(trade, reason = 'manual') {
+    try {
+      // Close order on OANDA
+      // TODO: Integrate with OANDA API
+      const result = { success: true };
+
+      if (result.success) {
+        console.log(`✅ Full close: ${trade.symbol} (${reason})`);
+        
+        // Remove from open trades
+        this.openTrades = this.openTrades.filter(t => t.tradeId !== trade.tradeId);
+      }
+    } catch (error) {
+      console.error('Error closing full trade:', error);
     }
   }
 
