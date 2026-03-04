@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import MambafXStrategy from './strategy.js';
 // FXOpen removed - using OANDA only
 import NotificationService from './notifications.js';
+import OandaAPI from './oanda-api.js';
 import * as db from './db.js';
 
 export class BotEngine {
@@ -33,8 +34,18 @@ export class BotEngine {
       positionSizePercent: 25,
     });
 
-    // FXOpen removed - using OANDA only
-    this.fxopen = null;
+    // Initialize OANDA API if credentials are provided
+    if (process.env.OANDA_ACCOUNT_ID && process.env.OANDA_API_TOKEN && process.env.OANDA_API_URL) {
+      this.oanda = new OandaAPI(
+        process.env.OANDA_ACCOUNT_ID,
+        process.env.OANDA_API_TOKEN,
+        process.env.OANDA_API_URL
+      );
+      console.log('✅ OANDA API initialized');
+    } else {
+      this.oanda = null;
+      console.log('⚠️  OANDA credentials not configured - using simulation mode');
+    }
 
     // Initialize Twilio notifications only if configured
     if (config.twilioAccountSid && config.twilioAuthToken && config.twilioPhoneNumber) {
@@ -61,6 +72,18 @@ export class BotEngine {
   async start() {
     console.log('🤖 MambafX Bot Starting...');
     this.isRunning = true;
+
+    // Fetch real account balance from OANDA if connected
+    if (this.oanda) {
+      try {
+        const accountDetails = await this.oanda.getAccountDetails();
+        this.accountBalance = accountDetails.balance;
+        console.log('💵 Account balance from OANDA: $' + this.accountBalance.toFixed(2));
+      } catch (error) {
+        console.error('⚠️  Could not fetch account balance from OANDA:', error.message);
+        console.log('Using default balance: $' + this.accountBalance);
+      }
+    }
 
     // Save bot status
     await db.saveBotSetting('botStatus', 'running');
