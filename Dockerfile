@@ -13,11 +13,8 @@ COPY server ./server
 COPY client ./client
 COPY *.js ./
 
-# Set environment variables
-ENV TWILIO_ACCOUNT_SID=US51086caee5617fb19454ad5bb228d18c
-ENV TWILIO_AUTH_TOKEN=df934059d3b2fec4c2eb0bbaf140acf3
-ENV TWILIO_PHONE_NUMBER=+18448210798
-ENV USER_PHONE_NUMBER=917-972-1327
+# Set non-secret environment variables
+# (Secrets like TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, etc. should be set in Railway Variables tab)
 ENV TRADING_CAPITAL=100
 ENV LEVERAGE=50
 ENV POSITION_SIZE_PERCENT=25
