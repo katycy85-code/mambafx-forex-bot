@@ -275,8 +275,25 @@ export class BotEngine {
       );
 
       // Place order on OANDA
-      // TODO: Integrate with OANDA API
-      const order = { success: true, orderId: tradeId };
+      let order = { success: false };
+      if (this.oanda) {
+        try {
+          const units = signal.direction === 'BUY' ? positionSizing.positionSize : -positionSizing.positionSize;
+          const takeProfitPips = Math.abs((profitTargets[0] - signal.entryPrice) / 0.0001);
+          const stopLossPips = Math.abs((signal.stopLoss - signal.entryPrice) / 0.0001);
+          
+          const result = await this.oanda.placeOrder(symbol, units, takeProfitPips, stopLossPips);
+          order = { success: true, orderId: result.tradeId, ...result };
+          console.log(`✅ Trade placed on OANDA for ${symbol}: ${units} units at ${result.entryPrice}`);
+        } catch (error) {
+          order = { success: false, error: error.message };
+          console.error(`❌ Failed to place order on OANDA for ${symbol}:`, error.message);
+        }
+      } else {
+        // Simulation mode
+        order = { success: true, orderId: tradeId };
+        console.log(`📊 SIMULATION: Trade placed for ${symbol}`);
+      }
 
       if (!order.success) {
         console.error(`Failed to place order for ${symbol}:`, order.error);
@@ -343,8 +360,15 @@ export class BotEngine {
     for (const trade of this.openTrades) {
       try {
         // Get current price from OANDA
-        // TODO: Integrate with OANDA API
-        const quote = { success: true, bid: 1.0, ask: 1.0 };
+        let quote = { success: false };
+        if (this.oanda) {
+          try {
+            quote = await this.oanda.getPrice(trade.symbol);
+            quote.success = true;
+          } catch (error) {
+            console.error(`Failed to get price for ${trade.symbol}:`, error.message);
+          }
+        }
         if (!quote.success) continue;
 
         const currentPrice = (quote.bid + quote.ask) / 2;
@@ -415,8 +439,16 @@ export class BotEngine {
   async closeFullTrade(trade, reason = 'manual') {
     try {
       // Close order on OANDA
-      // TODO: Integrate with OANDA API
-      const result = { success: true };
+      let result = { success: false };
+      if (this.oanda) {
+        try {
+          result = await this.oanda.closeTrade(trade.orderId);
+          result.success = true;
+        } catch (error) {
+          console.error(`Failed to close trade ${trade.tradeId}:`, error.message);
+          result.success = false;
+        }
+      }
 
       if (result.success) {
         console.log(`✅ Full close: ${trade.symbol} (${reason})`);
@@ -437,8 +469,16 @@ export class BotEngine {
       const volumeToClose = trade.positionSize * percentage;
 
       // Close order on OANDA
-      // TODO: Integrate with OANDA API
-      const result = { success: true };
+      let result = { success: false };
+      if (this.oanda) {
+        try {
+          result = await this.oanda.closeTrade(trade.orderId);
+          result.success = true;
+        } catch (error) {
+          console.error(`Failed to close trade ${trade.tradeId}:`, error.message);
+          result.success = false;
+        }
+      }
 
       if (result.success) {
         console.log(
@@ -471,8 +511,26 @@ export class BotEngine {
    * Get candles from OANDA
    */
   async getCandles(symbol, timeframe, limit) {
-    // TODO: Integrate with OANDA API
-    return { success: true, candles: [] };
+    try {
+      if (!this.oanda) {
+        console.log(`⚠️  OANDA not configured - cannot fetch real candles for ${symbol}`);
+        return { success: false, candles: [] };
+      }
+
+      // Convert timeframe format: '5m' -> 'M5', '15m' -> 'M15', '4h' -> 'H4'
+      let granularity = timeframe.toUpperCase();
+      if (granularity.includes('M')) {
+        granularity = 'M' + granularity.replace('M', '');
+      } else if (granularity.includes('H')) {
+        granularity = 'H' + granularity.replace('H', '');
+      }
+
+      const candles = await this.oanda.getCandles(symbol, granularity, limit);
+      return { success: true, candles };
+    } catch (error) {
+      console.error(`Error fetching candles for ${symbol}:`, error.message);
+      return { success: false, candles: [], error: error.message };
+    }
   }
 
   /**
@@ -481,8 +539,21 @@ export class BotEngine {
   async updateAccountBalance() {
     try {
       // Get balance from OANDA
-      // TODO: Integrate with OANDA API
-      const balance = { success: true, balance: this.accountBalance, equity: this.accountBalance, usedMargin: 0, freeMargin: this.accountBalance };
+      let balance = { success: false };
+      if (this.oanda) {
+        try {
+          const accountDetails = await this.oanda.getAccountDetails();
+          balance = {
+            success: true,
+            balance: accountDetails.balance,
+            equity: accountDetails.balance + accountDetails.unrealizedPL,
+            usedMargin: accountDetails.marginUsed,
+            freeMargin: accountDetails.marginAvailable,
+          };
+        } catch (error) {
+          console.error(`Failed to get account balance:`, error.message);
+        }
+      }
 
       if (balance.success) {
         this.accountBalance = balance.balance;
