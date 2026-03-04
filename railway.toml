@@ -1,0 +1,19 @@
+[build]
+builder = "dockerfile"
+
+[deploy]
+startCommand = "node server/index.js"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 5
+
+[env]
+NODE_ENV = "production"
+PORT = "3000"
+BOT_MODE = "live"
+TRADING_CAPITAL = "100"
+LEVERAGE = "50"
+TRADING_PAIRS = "EUR/USD,GBP/USD,AUD/USD"
+TRADING_TIMEFRAMES = "15m,5m"
+TRADING_HOURS = "NY_OPEN"
+POSITION_SIZE_PERCENT = "25"
+RISK_PER_TRADE = "1"

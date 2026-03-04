@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
@@ -8,14 +8,13 @@ COPY package*.json ./
 # Install dependencies
 RUN npm ci --only=production
 
-# Copy source code
-COPY . .
-
-# Build frontend
-RUN npm run build
+# Copy application code
+COPY server ./server
+COPY client ./client
+COPY *.js ./
 
 # Expose port
 EXPOSE 3000
 
-# Start server
-CMD ["npm", "start"]
+# Start the bot
+CMD ["node", "server/index.js"]
