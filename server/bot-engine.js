@@ -11,6 +11,7 @@ import * as db from './db.js';
 
 export class BotEngine {
   constructor(config) {
+    console.log('DEBUG: BotEngine constructor received config:', JSON.stringify(config, null, 2));
     this.config = {
       tradingCapital: 200,
       leverage: 100,
@@ -24,6 +25,7 @@ export class BotEngine {
       nyCloseMinute: 0,
       ...config,
     };
+    console.log('DEBUG: Final config.tradingPairs:', this.config.tradingPairs);
 
     this.strategy = new MambafXStrategy({
       minConfirmations: 3,
