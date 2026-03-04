@@ -34,11 +34,17 @@ export class BotEngine {
     // FXOpen removed - using OANDA only
     this.fxopen = null;
 
-    this.notifications = new NotificationService(
-      config.twilioAccountSid,
-      config.twilioAuthToken,
-      config.twilioPhoneNumber
-    );
+    // Initialize Twilio notifications only if configured
+    if (config.twilioAccountSid && config.twilioAuthToken && config.twilioPhoneNumber) {
+      this.notifications = new NotificationService(
+        config.twilioAccountSid,
+        config.twilioAuthToken,
+        config.twilioPhoneNumber
+      );
+    } else {
+      this.notifications = null;
+      console.log('ℹ️  Twilio not configured - SMS notifications disabled');
+    }
 
     this.userPhoneNumber = config.userPhoneNumber;
     this.isRunning = false;
@@ -57,13 +63,15 @@ export class BotEngine {
     // Save bot status
     await db.saveBotSetting('botStatus', 'running');
 
-    // Send start notification
-    await this.notifications.notifyBotStatus(this.userPhoneNumber, {
-      isRunning: true,
-      accountBalance: this.accountBalance,
-      openPositions: this.openTrades.length,
-      dailyPnL: this.dailyPnL,
-    });
+    // Send start notification if Twilio is configured
+    if (this.notifications) {
+      await this.notifications.notifyBotStatus(this.userPhoneNumber, {
+        isRunning: true,
+        accountBalance: this.accountBalance,
+        openPositions: this.openTrades.length,
+        dailyPnL: this.dailyPnL,
+      });
+    }
 
     // Start trading loop
     this.startTradingLoop();
@@ -79,13 +87,15 @@ export class BotEngine {
     // Save bot status
     await db.saveBotSetting('botStatus', 'stopped');
 
-    // Send stop notification
-    await this.notifications.notifyBotStatus(this.userPhoneNumber, {
-      isRunning: false,
-      accountBalance: this.accountBalance,
-      openPositions: this.openTrades.length,
-      dailyPnL: this.dailyPnL,
-    });
+    // Send stop notification if Twilio is configured
+    if (this.notifications) {
+      await this.notifications.notifyBotStatus(this.userPhoneNumber, {
+        isRunning: false,
+        accountBalance: this.accountBalance,
+        openPositions: this.openTrades.length,
+        dailyPnL: this.dailyPnL,
+      });
+    }
   }
 
   /**
@@ -112,9 +122,11 @@ export class BotEngine {
         await this.sleep(60000);
       } catch (error) {
         console.error('Bot Error:', error);
-        await this.notifications.notifyError(this.userPhoneNumber, {
-          message: error.message,
-        });
+        if (this.notifications) {
+          await this.notifications.notifyError(this.userPhoneNumber, {
+            message: error.message,
+          });
+        }
       }
     }
   }
@@ -181,14 +193,16 @@ export class BotEngine {
 
     if (this.config.botMode === 'manual') {
       // Send notification and wait for approval
-      await this.notifications.notifyEntrySignal(this.userPhoneNumber, {
-        symbol,
-        direction: signal.direction,
-        entryPrice: signal.entryPrice,
-        stopLoss: signal.stopLoss,
-        riskRewardRatio: signal.riskRewardRatio || this.config.leverage,
-        confirmationCount: signal.confirmationCount,
-      });
+      if (this.notifications) {
+        await this.notifications.notifyEntrySignal(this.userPhoneNumber, {
+          symbol,
+          direction: signal.direction,
+          entryPrice: signal.entryPrice,
+          stopLoss: signal.stopLoss,
+          riskRewardRatio: signal.riskRewardRatio || this.config.leverage,
+          confirmationCount: signal.confirmationCount,
+        });
+      }
 
       // Store pending trade for manual approval
       await db.saveBotSetting(`pending_trade_${symbol}`, JSON.stringify(signal));
@@ -199,14 +213,16 @@ export class BotEngine {
         await this.executeTrade(symbol, signal);
       } else {
         // Send notification for additional trades
-        await this.notifications.notifyEntrySignal(this.userPhoneNumber, {
-          symbol,
-          direction: signal.direction,
-          entryPrice: signal.entryPrice,
-          stopLoss: signal.stopLoss,
-          riskRewardRatio: signal.riskRewardRatio || this.config.leverage,
-          confirmationCount: signal.confirmationCount,
-        });
+        if (this.notifications) {
+          await this.notifications.notifyEntrySignal(this.userPhoneNumber, {
+            symbol,
+            direction: signal.direction,
+            entryPrice: signal.entryPrice,
+            stopLoss: signal.stopLoss,
+            riskRewardRatio: signal.riskRewardRatio || this.config.leverage,
+            confirmationCount: signal.confirmationCount,
+          });
+        }
       }
     } else if (this.config.botMode === 'full-auto') {
       // Execute trade automatically
@@ -242,10 +258,12 @@ export class BotEngine {
 
       if (!order.success) {
         console.error(`Failed to place order for ${symbol}:`, order.error);
-        await this.notifications.notifyError(this.userPhoneNumber, {
-          symbol,
-          message: `Failed to place order: ${order.error}`,
-        });
+        if (this.notifications) {
+          await this.notifications.notifyError(this.userPhoneNumber, {
+            symbol,
+            message: `Failed to place order: ${order.error}`,
+          });
+        }
         return;
       }
 
@@ -272,23 +290,27 @@ export class BotEngine {
         partialClosedAt: [],
       });
 
-      // Send notification
-      await this.notifications.notifyTradeOpened(this.userPhoneNumber, {
-        symbol,
-        direction: signal.direction,
-        entryPrice: signal.entryPrice,
-        stopLoss: signal.stopLoss,
-        riskAmount: positionSizing.riskAmount,
-        positionSize: positionSizing.positionSize,
-      });
+      // Send notification if Twilio is configured
+      if (this.notifications) {
+        await this.notifications.notifyTradeOpened(this.userPhoneNumber, {
+          symbol,
+          direction: signal.direction,
+          entryPrice: signal.entryPrice,
+          stopLoss: signal.stopLoss,
+          riskAmount: positionSizing.riskAmount,
+          positionSize: positionSizing.positionSize,
+        });
+      }
 
       console.log(`✅ Trade opened: ${symbol} ${signal.direction}`);
     } catch (error) {
       console.error('Error executing trade:', error);
-      await this.notifications.notifyError(this.userPhoneNumber, {
-        symbol,
-        message: `Trade execution error: ${error.message}`,
-      });
+      if (this.notifications) {
+        await this.notifications.notifyError(this.userPhoneNumber, {
+          symbol,
+          message: `Trade execution error: ${error.message}`,
+        });
+      }
     }
   }
 

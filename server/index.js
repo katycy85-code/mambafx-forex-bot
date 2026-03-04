@@ -17,14 +17,11 @@ if (process.env.NODE_ENV !== 'production') {
   dotenv.config();
 }
 
-// Verify critical environment variables are set
-const requiredEnvVars = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_PHONE_NUMBER', 'USER_PHONE_NUMBER'];
-const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
-
-if (missingEnvVars.length > 0) {
-  console.error('❌ FATAL: Missing required environment variables:', missingEnvVars);
-  console.error('Please set these in Railway Variables tab or .env file');
-  process.exit(1);
+// Twilio is optional - bot runs without SMS if not configured
+const twilioConfigured = process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER;
+if (!twilioConfigured) {
+  console.warn('⚠️  Twilio not configured. SMS notifications disabled.');
+  console.warn('You can add Twilio credentials later to enable SMS alerts.');
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -55,20 +52,20 @@ async function initializeServer() {
       USER_PHONE_NUMBER: process.env.USER_PHONE_NUMBER ? 'SET' : 'MISSING',
     });
 
-    // Initialize bot engine
-    botEngine = new BotEngine({
-      fxopenApiKey: process.env.FXOPEN_API_KEY,
-      fxopenApiSecret: process.env.FXOPEN_API_SECRET,
-      fxopenAccountId: process.env.FXOPEN_ACCOUNT_ID,
-      twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
-      twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
-      twilioPhoneNumber: process.env.TWILIO_PHONE_NUMBER,
-      userPhoneNumber: process.env.USER_PHONE_NUMBER,
-      tradingCapital: parseInt(process.env.TRADING_CAPITAL || '200'),
-      leverage: parseInt(process.env.LEVERAGE || '100'),
+    // Initialize bot engine - Twilio is optional
+    const botConfig = {
+      tradingCapital: parseInt(process.env.TRADING_CAPITAL || '100'),
+      leverage: parseInt(process.env.LEVERAGE || '50'),
       botMode: process.env.BOT_MODE || 'manual',
       tradingPairs: (process.env.TRADING_PAIRS || 'EUR/USD,GBP/USD,AUD/USD').split(','),
-    });
+    };
+    if (twilioConfigured) {
+      botConfig.twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
+      botConfig.twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+      botConfig.twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
+      botConfig.userPhoneNumber = process.env.USER_PHONE_NUMBER;
+    }
+    botEngine = new BotEngine(botConfig);
 
     console.log('✅ Bot engine initialized');
   } catch (error) {
