@@ -17,7 +17,7 @@ export class BotEngine {
       maxDailyLoss: 5,
       maxDrawdown: 15,
       botMode: 'manual', // manual, semi-auto, full-auto
-      tradingPairs: ['EUR/USD', 'GBP/USD', 'AUD/USD', 'USD/JPY', 'NZD/USD'],
+      tradingPairs: ['EUR/USD', 'GBP/USD', 'AUD/USD', 'USD/JPY', 'NZD/USD', 'XAU/USD'],
       nyOpenHour: 6,
       nyOpenMinute: 30,
       nyCloseHour: 15,
