@@ -8,7 +8,7 @@ export class MambafXStrategy {
     this.config = {
       minConfirmations: 3,
       riskRewardRatio: 7,
-      positionSizePercent: 25,
+      positionSizePercent: 10,
       stopLossPips: 30,
       profitTarget1Ratio: 3,
       profitTarget2Ratio: 5,

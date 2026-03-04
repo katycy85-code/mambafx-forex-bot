@@ -14,9 +14,9 @@ export class BotEngine {
   constructor(config) {
     console.log('DEBUG: BotEngine constructor received config:', JSON.stringify(config, null, 2));
     this.config = {
-      tradingCapital: 200,
-      leverage: 100,
-      maxDailyLoss: 5,
+      tradingCapital: 100,
+      leverage: 25,
+      maxDailyLoss: 50,
       maxDrawdown: 15,
       botMode: 'manual', // manual, semi-auto, full-auto
       tradingPairs: ['EUR/USD', 'GBP/USD', 'AUD/USD', 'USD/JPY', 'NZD/USD', 'XAU/USD'],
