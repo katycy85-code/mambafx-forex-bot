@@ -92,26 +92,33 @@ export class OandaAPI {
       }
 
       const data = await response.json();
-      return data.candles.map(candle => ({
-        time: candle.time,
-        open: parseFloat(candle.mid.o),
-        high: parseFloat(candle.mid.h),
-        low: parseFloat(candle.mid.l),
-        close: parseFloat(candle.mid.c),
-        volume: candle.volume,
-        bid: {
-          o: parseFloat(candle.bid.o),
-          h: parseFloat(candle.bid.h),
-          l: parseFloat(candle.bid.l),
-          c: parseFloat(candle.bid.c),
-        },
-        ask: {
-          o: parseFloat(candle.ask.o),
-          h: parseFloat(candle.ask.h),
-          l: parseFloat(candle.ask.l),
-          c: parseFloat(candle.ask.c),
-        },
-      }));
+      if (!data.candles || data.candles.length === 0) {
+        throw new Error('No candles returned from OANDA');
+      }
+      console.log('DEBUG: First candle structure:', JSON.stringify(data.candles[0]).substring(0, 500));
+      return data.candles.map(candle => {
+        const mid = candle.mid || { o: candle.bid?.o, h: candle.bid?.h, l: candle.bid?.l, c: candle.bid?.c };
+        return {
+          time: candle.time,
+          open: parseFloat(mid.o || 0),
+          high: parseFloat(mid.h || 0),
+          low: parseFloat(mid.l || 0),
+          close: parseFloat(mid.c || 0),
+          volume: candle.volume || 0,
+          bid: {
+            o: parseFloat(candle.bid?.o || 0),
+            h: parseFloat(candle.bid?.h || 0),
+            l: parseFloat(candle.bid?.l || 0),
+            c: parseFloat(candle.bid?.c || 0),
+          },
+          ask: {
+            o: parseFloat(candle.ask?.o || 0),
+            h: parseFloat(candle.ask?.h || 0),
+            l: parseFloat(candle.ask?.l || 0),
+            c: parseFloat(candle.ask?.c || 0),
+          },
+        };
+      });
     } catch (error) {
       console.error(`Error fetching candles for ${pair}:`, error.message);
       throw error;
