@@ -11,7 +11,21 @@ import path from 'path';
 import BotEngine from './bot-engine.js';
 import * as db from './db.js';
 
-dotenv.config();
+// Load .env file if it exists (for local development)
+// Railway environment variables take priority and override .env
+if (process.env.NODE_ENV !== 'production') {
+  dotenv.config();
+}
+
+// Verify critical environment variables are set
+const requiredEnvVars = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_PHONE_NUMBER', 'USER_PHONE_NUMBER'];
+const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+
+if (missingEnvVars.length > 0) {
+  console.error('❌ FATAL: Missing required environment variables:', missingEnvVars);
+  console.error('Please set these in Railway Variables tab or .env file');
+  process.exit(1);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
