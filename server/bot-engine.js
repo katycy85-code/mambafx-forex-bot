@@ -34,19 +34,18 @@ export class BotEngine {
       positionSizePercent: 25,
     });
 
-    // Initialize OANDA API if credentials are provided
-    console.log('DEBUG OANDA:', {
-      OANDA_ACCOUNT_ID: process.env.OANDA_ACCOUNT_ID ? 'SET' : 'MISSING',
-      OANDA_API_TOKEN: process.env.OANDA_API_TOKEN ? 'SET' : 'MISSING',
-      OANDA_API_URL: process.env.OANDA_API_URL ? 'SET' : 'MISSING',
-    });
-    if (process.env.OANDA_ACCOUNT_ID && process.env.OANDA_API_TOKEN && process.env.OANDA_API_URL) {
+    // Initialize OANDA API with hardcoded credentials
+    const oandaAccountId = process.env.OANDA_ACCOUNT_ID || '001-001-17887452-001';
+    const oandaApiToken = process.env.OANDA_API_TOKEN || 'd1613cf312d0d35c93db8b37f2a1d48f-4cae4dcbb78257d569421fcfb4046bd0';
+    const oandaApiUrl = process.env.OANDA_API_URL || 'https://api-fxtrade.oanda.com';
+    
+    if (oandaAccountId && oandaApiToken && oandaApiUrl) {
       this.oanda = new OandaAPI(
-        process.env.OANDA_ACCOUNT_ID,
-        process.env.OANDA_API_TOKEN,
-        process.env.OANDA_API_URL
+        oandaAccountId,
+        oandaApiToken,
+        oandaApiUrl
       );
-      console.log('✅ OANDA API initialized');
+      console.log('✅ OANDA API initialized with live account');
     } else {
       this.oanda = null;
       console.log('⚠️  OANDA credentials not configured - using simulation mode');
