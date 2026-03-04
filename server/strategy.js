@@ -349,6 +349,32 @@ export class MambafXStrategy {
   }
 
   /**
+   * Check volume against average (volume filter)
+   */
+  checkVolume(candles1M, lookback = 20) {
+    if (!candles1M || candles1M.length < lookback) {
+      return { hasVolume: false, reason: 'Insufficient data' };
+    }
+
+    const recent = candles1M.slice(-lookback);
+    const volumes = recent.map(c => c.volume || 0);
+    const currentVolume = volumes[volumes.length - 1];
+    const avgVolume = volumes.slice(0, -1).reduce((a, b) => a + b, 0) / (volumes.length - 1);
+
+    const volumeRatio = currentVolume / avgVolume;
+    const hasVolume = volumeRatio >= this.config.volumeThreshold;
+
+    return {
+      hasVolume,
+      currentVolume,
+      avgVolume,
+      volumeRatio,
+      threshold: this.config.volumeThreshold,
+      reason: hasVolume ? 'Volume OK' : `Low volume`,
+    };
+  }
+
+  /**
    * Check if trade should be skipped
    */
   shouldSkipTrade(candles4H, candles1M, bias) {
@@ -361,6 +387,12 @@ export class MambafXStrategy {
     const consolidation = this.detectConsolidation(candles1M);
     if (consolidation.isConsolidating) {
       return { skip: true, reason: `Market consolidating: ${consolidation.reason}` };
+    }
+
+    // Skip if insufficient volume (CRITICAL for 24/7 trading)
+    const volumeCheck = this.checkVolume(candles1M);
+    if (!volumeCheck.hasVolume) {
+      return { skip: true, reason: `Volume filter: ${volumeCheck.reason}` };
     }
 
     // Skip if insufficient confirmations

@@ -104,12 +104,9 @@ export class BotEngine {
   async startTradingLoop() {
     while (this.isRunning) {
       try {
-        // Check if it's NY trading hours
-        if (this.isNYTradingHours()) {
-          // Scan all trading pairs
-          for (const pair of this.config.tradingPairs) {
-            await this.analyzeAndTrade(pair);
-          }
+        // Trade 24/7 (volume filter will prevent low-liquidity trades)
+        for (const pair of this.config.tradingPairs) {
+          await this.analyzeAndTrade(pair);
         }
 
         // Check open trades
