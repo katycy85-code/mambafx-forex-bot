@@ -35,6 +35,11 @@ export class BotEngine {
     });
 
     // Initialize OANDA API if credentials are provided
+    console.log('DEBUG OANDA:', {
+      OANDA_ACCOUNT_ID: process.env.OANDA_ACCOUNT_ID ? 'SET' : 'MISSING',
+      OANDA_API_TOKEN: process.env.OANDA_API_TOKEN ? 'SET' : 'MISSING',
+      OANDA_API_URL: process.env.OANDA_API_URL ? 'SET' : 'MISSING',
+    });
     if (process.env.OANDA_ACCOUNT_ID && process.env.OANDA_API_TOKEN && process.env.OANDA_API_URL) {
       this.oanda = new OandaAPI(
         process.env.OANDA_ACCOUNT_ID,
