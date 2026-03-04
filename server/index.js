@@ -53,12 +53,15 @@ async function initializeServer() {
     });
 
     // Initialize bot engine - Twilio is optional
+    const defaultPairs = 'EUR/USD,GBP/USD,AUD/USD,USD/JPY,NZD/USD,XAU/USD';
+    const tradingPairsEnv = process.env.TRADING_PAIRS || defaultPairs;
     const botConfig = {
       tradingCapital: parseInt(process.env.TRADING_CAPITAL || '100'),
       leverage: parseInt(process.env.LEVERAGE || '50'),
       botMode: process.env.BOT_MODE || 'manual',
-      tradingPairs: (process.env.TRADING_PAIRS || 'EUR/USD,GBP/USD,AUD/USD').split(','),
+      tradingPairs: tradingPairsEnv.split(',').map(p => p.trim()),
     };
+    console.log('Trading pairs configured:', botConfig.tradingPairs);
     if (twilioConfigured) {
       botConfig.twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
       botConfig.twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
