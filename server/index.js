@@ -28,6 +28,30 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+
+// Log strategy configuration
+function logStrategyConfig(botConfig) {
+  console.log('\n=== MAMBAFX STRATEGY CONFIGURATION ===');
+  console.log('Trading Pairs:', botConfig.tradingPairs.join(', '));
+  console.log('Trading Capital: $' + botConfig.tradingCapital);
+  console.log('Leverage: ' + botConfig.leverage + 'x');
+  console.log('Bot Mode:', botConfig.botMode);
+  console.log('\n=== STRATEGY SETTINGS ===');
+  console.log('Timeframes: 15M (bias) + 5M (entry)');
+  console.log('Volume Filter: 20% above average');
+  console.log('Min Confirmations: 3');
+  console.log('Risk/Reward Ratio: 1:7');
+  console.log('Position Size: 25% of capital');
+  console.log('Chop Exit: After 10 minutes if choppy');
+  console.log('Trading Mode: 24/7 (with volume filter)');
+  console.log('\n=== ENABLED FEATURES ===');
+  console.log('✓ Volume filtering');
+  console.log('✓ Chop detection');
+  console.log('✓ 24/7 trading (forex + gold)');
+  console.log('✓ Scalping optimized (5M/15M)');
+  console.log('✓ Partial profit taking');
+  console.log('=====================================\n');
+}
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -71,6 +95,7 @@ async function initializeServer() {
     botEngine = new BotEngine(botConfig);
 
     console.log('✅ Bot engine initialized');
+    logStrategyConfig(botConfig);
   } catch (error) {
     console.error('Server initialization error:', error);
     process.exit(1);
