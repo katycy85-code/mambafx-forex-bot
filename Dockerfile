@@ -5,13 +5,20 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production --legacy-peer-deps
+# Install dependencies (including dev dependencies for build)
+RUN npm ci --legacy-peer-deps
 
 # Copy application code
 COPY server ./server
 COPY client ./client
+COPY vite.config.js ./
 COPY *.js ./
+
+# Build React frontend
+RUN npm run build
+
+# Remove dev dependencies to reduce image size
+RUN npm ci --only=production --legacy-peer-deps
 
 # Set non-secret environment variables
 # (Secrets like TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, etc. should be set in Railway Variables tab)
