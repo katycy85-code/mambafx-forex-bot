@@ -9,6 +9,7 @@ import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import BotEngine from './bot-engine.js';
+import { CoveredCallsEngine } from './covered-calls-engine.js';
 import * as db from './db.js';
 
 // Load .env file if it exists (for local development)
@@ -58,6 +59,7 @@ app.use(express.json());
 
 // Initialize bot engine
 let botEngine = null;
+let coveredCallsEngine = null;
 
 /**
  * Initialize server
@@ -96,6 +98,17 @@ async function initializeServer() {
 
     console.log('✅ Bot engine initialized');
     logStrategyConfig(botConfig);
+
+    // Initialize covered calls engine
+    coveredCallsEngine = new CoveredCallsEngine();
+    console.log('✅ Covered Calls Engine initialized');
+
+    // Schedule hourly scans
+    setInterval(async () => {
+      console.log('📊 Running scheduled covered calls scan...');
+      await coveredCallsEngine.runFullScan();
+      console.log(coveredCallsEngine.formatResults());
+    }, 3600000); // Every hour
   } catch (error) {
     console.error('Server initialization error:', error);
     process.exit(1);
