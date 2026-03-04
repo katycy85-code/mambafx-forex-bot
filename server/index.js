@@ -77,7 +77,7 @@ async function initializeServer() {
     });
 
     // Initialize bot engine - Twilio is optional
-    const defaultPairs = 'EUR/USD,GBP/USD,AUD/USD,USD/JPY,NZD/USD,XAU/USD';
+    const defaultPairs = 'EUR/USD,GBP/USD,AUD/USD,USD/JPY,NZD/USD,XAU/USD,USD/CAD,GBP/JPY';
     const tradingPairsEnv = process.env.TRADING_PAIRS || defaultPairs;
     const botConfig = {
       tradingCapital: parseInt(process.env.TRADING_CAPITAL || '100'),
