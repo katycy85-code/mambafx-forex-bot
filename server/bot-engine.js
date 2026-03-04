@@ -5,6 +5,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import MambafXStrategy from './strategy.js';
+import { QuickScalpStrategy } from './quick-scalp-strategy.js';
 // FXOpen removed - using OANDA only
 import NotificationService from './notifications.js';
 import OandaAPI from './oanda-api.js';
@@ -18,8 +19,8 @@ export class BotEngine {
       leverage: 25,
       maxDailyLoss: 50,
       maxDrawdown: 15,
-      botMode: 'manual', // manual, semi-auto, full-auto
-      tradingPairs: ['EUR/USD', 'GBP/USD', 'AUD/USD', 'USD/JPY', 'NZD/USD', 'XAU/USD'],
+      botMode: 'full-auto', // manual, semi-auto, full-auto
+      tradingPairs: ['EUR/USD', 'GBP/USD', 'AUD/USD', 'USD/JPY', 'NZD/USD', 'XAU/USD', 'USD/CAD', 'GBP/JPY'],
       nyOpenHour: 6,
       nyOpenMinute: 30,
       nyCloseHour: 15,
@@ -33,6 +34,9 @@ export class BotEngine {
       riskRewardRatio: 7,
       positionSizePercent: 25,
     });
+
+    // Initialize Quick Scalp strategy
+    this.quickScalpStrategy = new QuickScalpStrategy(this.config.tradingCapital);
 
     // Initialize OANDA API with hardcoded credentials
     const oandaAccountId = process.env.OANDA_ACCOUNT_ID || '001-001-17887452-001';
@@ -162,39 +166,60 @@ export class BotEngine {
    */
   async analyzeAndTrade(symbol) {
     try {
-      // Get 15M (for bias) and 5M (for entry) candles - MambafX approach
-      const candles15M = await this.getCandles(symbol, '15m', 50);
+      // Get 5M candles for both strategies
       const candles5M = await this.getCandles(symbol, '5m', 100);
+      const candles15M = await this.getCandles(symbol, '15m', 50);
 
-      if (!candles15M.success || !candles5M.success) {
+      if (!candles5M.success || !candles15M.success) {
         console.log(`Failed to get candles for ${symbol}`);
         return;
       }
 
-      // Analyze bias from 15M
-      const bias = this.strategy.analyzeBias(candles15M.candles);
+      // Count open trades for this symbol
+      const openTradesForSymbol = this.openTrades.filter(t => t.symbol === symbol).length;
 
-      // Check if should skip
+      // Strategy 1: MambafX (high quality, fewer trades)
+      const bias = this.strategy.analyzeBias(candles15M.candles);
       const shouldSkip = this.strategy.shouldSkipTrade(
         candles15M.candles,
         candles5M.candles,
         bias
       );
 
-      if (shouldSkip.skip) {
-        console.log(`Skipping ${symbol}: ${shouldSkip.reason}`);
-        return;
+      if (!shouldSkip.skip) {
+        const mambafxSignal = this.strategy.generateEntrySignal(
+          candles15M.candles,
+          candles5M.candles,
+          bias
+        );
+
+        if (mambafxSignal.signal === 'ENTRY') {
+          console.log(`[MambafX] ${symbol}: ${mambafxSignal.direction} signal`);
+          await this.handleEntrySignal(symbol, { ...mambafxSignal, strategy: 'MambafX' });
+          return; // Execute MambafX if signal found
+        }
       }
 
-      // Generate entry signal from 5M
-      const signal = this.strategy.generateEntrySignal(
-        candles15M.candles,
-        candles5M.candles,
-        bias
-      );
+      // Strategy 2: Quick Scalp (high frequency, small wins)
+      if (openTradesForSymbol < this.quickScalpStrategy.maxConcurrentTrades) {
+        const quickScalpSignal = this.quickScalpStrategy.analyzeSignal(
+          candles5M.candles,
+          openTradesForSymbol
+        );
 
-      if (signal.signal === 'ENTRY') {
-        await this.handleEntrySignal(symbol, signal);
+        if (quickScalpSignal.signal !== 'NONE') {
+          console.log(`[Quick Scalp] ${symbol}: ${quickScalpSignal.signal} - ${quickScalpSignal.reason}`);
+          const tradeSignal = {
+            signal: 'ENTRY',
+            direction: quickScalpSignal.signal === 'BUY' ? 1 : -1,
+            entryPrice: candles5M.candles[candles5M.candles.length - 1].close,
+            stopLoss: this.quickScalpStrategy.stopLossPips,
+            takeProfit: this.quickScalpStrategy.takeProfitPips,
+            strategy: 'QuickScalp',
+            reason: quickScalpSignal.reason,
+          };
+          await this.handleEntrySignal(symbol, tradeSignal);
+        }
       }
     } catch (error) {
       console.error(`Error analyzing ${symbol}:`, error);
