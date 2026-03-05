@@ -1,167 +1,180 @@
 /**
  * News Calendar Module
- * Fetches high-impact economic events from OANDA
- * Prevents trading 30 minutes before and after major news
+ * Fetches high-impact economic events from ForexFactory's public calendar feed
+ * Prevents trading 30 minutes before and after major news events
+ *
+ * Data source: https://nfs.faireconomy.media/ff_calendar_thisweek.json
+ * (Free public ForexFactory calendar - no API key required)
  */
 
 import fetch from 'node-fetch';
 
 export class NewsCalendar {
-  constructor(oandaApi) {
-    this.oandaApi = oandaApi;
+  constructor() {
     this.cachedEvents = [];
     this.lastFetchTime = 0;
     this.cacheDuration = 3600000; // 1 hour cache
-    
-    // High-impact news keywords
-    this.highImpactKeywords = [
-      'NFP',
-      'Non-Farm Payroll',
-      'CPI',
-      'Consumer Price Index',
-      'Fed',
-      'Federal Reserve',
-      'Interest Rate',
-      'FOMC',
-      'ECB',
-      'European Central Bank',
-      'GDP',
-      'Gross Domestic Product',
-      'Unemployment',
-      'Inflation',
-      'Retail Sales',
-      'ISM',
-      'Manufacturing',
-      'Services',
-      'PMI',
-      'Purchasing Managers',
-    ];
+
+    // Currencies we trade - only block on news for these
+    this.tradedCurrencies = ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'NZD', 'CAD', 'CHF'];
   }
 
   /**
-   * Check if there's high-impact news in the next 30 minutes
+   * Check if there's high-impact news in the blackout window for a given pair
+   * @param {string} currencyPair - e.g. 'EUR/USD'
+   * @param {number} blackoutMinutes - minutes before/after news to block (default 30)
+   * @returns {{ active: boolean, event?: string, timeUntil?: number, reason?: string }}
    */
-  async isNewsWindowActive(currencyPair = null) {
+  async isNewsWindowActive(currencyPair = null, blackoutMinutes = 30) {
     const now = new Date();
     const events = await this.getUpcomingEvents();
-    
+
     if (!events || events.length === 0) {
       return { active: false, reason: 'No events found' };
     }
 
+    const blackoutMs = blackoutMinutes * 60 * 1000;
+
     for (const event of events) {
       const eventTime = new Date(event.timestamp);
       const timeDiff = eventTime.getTime() - now.getTime();
-      
-      // Check if event is within 30 min before or after
-      const thirtyMinMs = 30 * 60 * 1000;
-      
-      if (timeDiff >= -thirtyMinMs && timeDiff <= thirtyMinMs) {
+
+      // Check if event is within the blackout window (before OR after)
+      if (timeDiff >= -blackoutMs && timeDiff <= blackoutMs) {
         // Check if event affects this currency pair
         if (currencyPair && !this.affectsPair(event, currencyPair)) {
           continue;
         }
-        
+
+        const minutesAway = Math.round(Math.abs(timeDiff) / 60000);
+        const direction = timeDiff > 0 ? 'in' : 'ago';
+
         return {
           active: true,
           event: event.title,
           impact: event.impact,
+          country: event.country,
           timeUntil: timeDiff,
           timestamp: event.timestamp,
-          reason: `High-impact news: ${event.title}`,
+          reason: `High-impact news: "${event.title}" (${event.country}) ${minutesAway}min ${direction}`,
         };
       }
     }
 
-    return { active: false, reason: 'No high-impact news in next 30 min' };
+    return { active: false, reason: 'No high-impact news in blackout window' };
   }
 
   /**
-   * Get upcoming high-impact events
+   * Get upcoming high-impact events (cached for 1 hour)
    */
   async getUpcomingEvents() {
     const now = Date.now();
-    
+
     // Return cached events if still fresh
     if (this.cachedEvents.length > 0 && (now - this.lastFetchTime) < this.cacheDuration) {
       return this.cachedEvents;
     }
 
     try {
-      // Try to fetch from OANDA economic calendar
-      const events = await this.fetchOandaCalendar();
-      
+      const events = await this.fetchForexFactoryCalendar();
       if (events && events.length > 0) {
         this.cachedEvents = events;
         this.lastFetchTime = now;
+        console.log(`📅 News calendar updated: ${events.length} high-impact events loaded`);
         return events;
       }
     } catch (error) {
-      console.error('Error fetching OANDA calendar:', error.message);
+      console.error('Error fetching ForexFactory calendar:', error.message);
     }
 
-    // Fallback: return empty array (no news data available)
-    return [];
+    // If fetch failed but we have stale cache, use it
+    if (this.cachedEvents.length > 0) {
+      console.warn('⚠️  Using stale news calendar cache');
+      return this.cachedEvents;
+    }
+
+    // Last resort: use built-in fallback schedule
+    console.warn('⚠️  Using built-in fallback news schedule');
+    return this.getFallbackCalendar();
   }
 
   /**
-   * Fetch economic calendar from OANDA
+   * Fetch this week's high-impact events from ForexFactory public JSON feed
    */
-  async fetchOandaCalendar() {
-    try {
-      // OANDA doesn't have a direct economic calendar API
-      // This is a placeholder for when/if they add it
-      // For now, we'll use a fallback approach
-      
-      console.log('📅 Attempting to fetch OANDA economic calendar...');
-      
-      // Placeholder: OANDA economic calendar endpoint (if available)
-      const response = await fetch('https://api-fxtrade.oanda.com/v3/economics/calendar', {
-        headers: {
-          'Authorization': `Bearer ${this.oandaApi.apiToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
+  async fetchForexFactoryCalendar() {
+    const url = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json';
 
-      if (!response.ok) {
-        console.warn(`Calendar API returned ${response.status} - using fallback`);
-        return this.getFallbackCalendar();
-      }
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'MambafX-Bot/1.0',
+        'Accept': 'application/json',
+      },
+      timeout: 10000,
+    });
 
-      const data = await response.json();
-      return this.parseCalendarEvents(data);
-    } catch (error) {
-      console.error('Calendar fetch failed:', error.message);
-      return this.getFallbackCalendar();
+    if (!response.ok) {
+      throw new Error(`ForexFactory calendar returned ${response.status}`);
     }
+
+    const data = await response.json();
+
+    if (!Array.isArray(data)) {
+      throw new Error('Unexpected ForexFactory response format');
+    }
+
+    // Filter to only HIGH impact events for currencies we trade
+    const highImpact = data.filter(event => {
+      if (event.impact !== 'High') return false;
+      return this.tradedCurrencies.includes(event.country);
+    });
+
+    // Map to our internal format
+    return highImpact.map(event => ({
+      title: event.title,
+      timestamp: event.date, // ISO 8601 with timezone offset
+      country: event.country,
+      impact: event.impact,
+      forecast: event.forecast || null,
+      previous: event.previous || null,
+    }));
   }
 
   /**
-   * Fallback: Use known high-impact news schedule based on common recurring events
-   * Returns events that are scheduled for today/tomorrow based on day-of-week patterns
+   * Check if an event affects a specific currency pair
+   */
+  affectsPair(event, pair) {
+    const pairUpper = pair.toUpperCase().replace('/', '');
+    const currency = event.country; // ForexFactory uses currency codes directly (USD, EUR, etc.)
+    return pairUpper.includes(currency);
+  }
+
+  /**
+   * Fallback: Built-in recurring high-impact event schedule (UTC times)
+   * Used only when ForexFactory feed is unavailable
    */
   getFallbackCalendar() {
     const now = new Date();
     const events = [];
 
-    // Major recurring events (times in UTC)
-    // These are approximate - the real calendar should be used in production
     const majorEvents = [
-      { name: 'US Non-Farm Payrolls', country: 'US', dayOfWeek: 5, hour: 13, minute: 30, impact: 'HIGH' },
-      { name: 'US CPI', country: 'US', dayOfWeek: 3, hour: 13, minute: 30, impact: 'HIGH' },
-      { name: 'FOMC Rate Decision', country: 'US', dayOfWeek: 3, hour: 19, minute: 0, impact: 'HIGH' },
-      { name: 'ECB Rate Decision', country: 'EU', dayOfWeek: 4, hour: 12, minute: 15, impact: 'HIGH' },
-      { name: 'US GDP', country: 'US', dayOfWeek: 4, hour: 13, minute: 30, impact: 'HIGH' },
-      { name: 'US Retail Sales', country: 'US', dayOfWeek: 3, hour: 13, minute: 30, impact: 'HIGH' },
-      { name: 'BOE Rate Decision', country: 'GB', dayOfWeek: 4, hour: 12, minute: 0, impact: 'HIGH' },
-      { name: 'BOJ Rate Decision', country: 'JP', dayOfWeek: 2, hour: 3, minute: 0, impact: 'HIGH' },
+      { name: 'US Non-Farm Payrolls',    country: 'USD', dayOfWeek: 5, hour: 13, minute: 30 },
+      { name: 'US CPI',                  country: 'USD', dayOfWeek: 3, hour: 13, minute: 30 },
+      { name: 'FOMC Rate Decision',      country: 'USD', dayOfWeek: 3, hour: 19, minute: 0  },
+      { name: 'ECB Rate Decision',       country: 'EUR', dayOfWeek: 4, hour: 12, minute: 15 },
+      { name: 'US GDP',                  country: 'USD', dayOfWeek: 4, hour: 13, minute: 30 },
+      { name: 'US Retail Sales',         country: 'USD', dayOfWeek: 3, hour: 13, minute: 30 },
+      { name: 'BOE Rate Decision',       country: 'GBP', dayOfWeek: 4, hour: 12, minute: 0  },
+      { name: 'BOJ Rate Decision',       country: 'JPY', dayOfWeek: 2, hour: 3,  minute: 0  },
+      { name: 'RBA Rate Decision',       country: 'AUD', dayOfWeek: 2, hour: 3,  minute: 30 },
+      { name: 'US Unemployment Claims',  country: 'USD', dayOfWeek: 4, hour: 13, minute: 30 },
+      { name: 'US ISM Manufacturing',    country: 'USD', dayOfWeek: 1, hour: 15, minute: 0  },
+      { name: 'US ADP Employment',       country: 'USD', dayOfWeek: 3, hour: 13, minute: 15 },
     ];
 
-    // Generate events for today and the next 2 days
     for (let dayOffset = 0; dayOffset <= 2; dayOffset++) {
       const checkDate = new Date(now);
       checkDate.setDate(checkDate.getDate() + dayOffset);
-      const dayOfWeek = checkDate.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+      const dayOfWeek = checkDate.getDay();
 
       for (const event of majorEvents) {
         if (event.dayOfWeek === dayOfWeek) {
@@ -171,93 +184,29 @@ export class NewsCalendar {
             title: event.name,
             timestamp: eventDate.toISOString(),
             country: event.country,
-            impact: event.impact,
+            impact: 'High',
           });
         }
       }
     }
 
-    console.log(`📅 Fallback calendar: ${events.length} events found for next 2 days`);
+    console.log(`📅 Fallback calendar: ${events.length} events for next 2 days`);
     return events;
   }
 
   /**
-   * Parse calendar events from API response
+   * Get a summary of upcoming events (for logging/status)
    */
-  parseCalendarEvents(data) {
-    if (!data || !data.events) return [];
-
-    return data.events
-      .filter(event => this.isHighImpact(event))
-      .map(event => ({
-        title: event.title,
-        timestamp: event.timestamp,
-        country: event.country,
-        impact: event.impact,
-        forecast: event.forecast,
-        previous: event.previous,
-      }));
-  }
-
-  /**
-   * Check if event is high-impact
-   */
-  isHighImpact(event) {
-    if (event.impact !== 'HIGH') return false;
-
-    // Check if title contains high-impact keywords
-    const title = event.title.toUpperCase();
-    return this.highImpactKeywords.some(keyword => title.includes(keyword.toUpperCase()));
-  }
-
-  /**
-   * Check if event affects a specific currency pair
-   */
-  affectsPair(event, pair) {
-    const pairUpper = pair.toUpperCase();
-    const countryCode = event.country;
-
-    // Map country codes to currencies
-    const countryToCurrency = {
-      'US': 'USD',
-      'EU': 'EUR',
-      'GB': 'GBP',
-      'JP': 'JPY',
-      'AU': 'AUD',
-      'NZ': 'NZD',
-      'CA': 'CAD',
-    };
-
-    const currency = countryToCurrency[countryCode];
-    if (!currency) return false;
-
-    return pairUpper.includes(currency);
-  }
-
-  /**
-   * Get time until next high-impact event
-   */
-  async getTimeToNextEvent() {
+  async getUpcomingEventsSummary() {
     const events = await this.getUpcomingEvents();
-    if (events.length === 0) return null;
-
     const now = Date.now();
-    const nextEvent = events[0];
-    const eventTime = new Date(nextEvent.timestamp).getTime();
-    
-    return {
-      event: nextEvent.title,
-      timeMs: eventTime - now,
-      timestamp: nextEvent.timestamp,
-    };
-  }
-
-  /**
-   * Format time difference for logging
-   */
-  formatTimeDiff(ms) {
-    const minutes = Math.floor(Math.abs(ms) / 60000);
-    const direction = ms < 0 ? 'ago' : 'in';
-    return `${minutes} min ${direction}`;
+    const next24h = events.filter(e => {
+      const t = new Date(e.timestamp).getTime();
+      return t > now && t < now + 24 * 60 * 60 * 1000;
+    });
+    return next24h.map(e => {
+      const mins = Math.round((new Date(e.timestamp).getTime() - now) / 60000);
+      return `${e.country} ${e.title} (in ${mins}min)`;
+    });
   }
 }

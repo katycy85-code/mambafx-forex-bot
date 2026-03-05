@@ -63,8 +63,8 @@ export class BotEngine {
       console.log('⚠️  OANDA credentials not configured - using simulation mode');
     }
 
-    // Initialize news calendar (uses OANDA API instance)
-    this.newsCalendar = this.oanda ? new NewsCalendar(this.oanda) : null;
+    // Initialize news calendar (uses ForexFactory public feed - no API key needed)
+    this.newsCalendar = new NewsCalendar();
     if (this.config.newsFilterEnabled && this.newsCalendar) {
       console.log(`✅ News filter enabled: ${this.config.newsBlackoutMinutes} min blackout window`);
     } else {
@@ -192,7 +192,7 @@ export class BotEngine {
     }
 
     try {
-      const newsStatus = await this.newsCalendar.isNewsWindowActive(pair);
+      const newsStatus = await this.newsCalendar.isNewsWindowActive(pair, this.config.newsBlackoutMinutes);
       if (newsStatus.active) {
         const minutesAway = Math.round(Math.abs(newsStatus.timeUntil) / 60000);
         const direction = newsStatus.timeUntil > 0 ? 'in' : 'ago';
