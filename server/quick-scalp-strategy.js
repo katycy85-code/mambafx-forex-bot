@@ -1,8 +1,8 @@
 /**
- * Quick Scalp Strategy
- * High-frequency conservative scalping strategy
- * Entry: RSI + MA crossover on 5M timeframe
- * Risk: 15 pips SL, 25 pips TP
+ * Quick Scalp Strategy - Active Edition
+ * High-frequency scalping strategy designed to trade multiple times per day
+ * Uses RSI momentum + trend + price action - no strict crossover required
+ * Risk: 15 pips SL, 25 pips TP (1:1.67 R:R)
  * Position: 5% of account per trade
  */
 
@@ -15,10 +15,11 @@ export class QuickScalpStrategy {
     this.maxConcurrentTrades = 3;
     this.rsiPeriod = 14;
     this.maPeriod = 20;
+    this.fastMaPeriod = 8;
   }
 
   /**
-   * Calculate RSI (Relative Strength Index)
+   * Calculate RSI
    */
   calculateRSI(closes, period = 14) {
     if (closes.length < period + 1) return null;
@@ -37,9 +38,7 @@ export class QuickScalpStrategy {
 
     if (avgLoss === 0) return 100;
     const rs = avgGain / avgLoss;
-    const rsi = 100 - (100 / (1 + rs));
-
-    return rsi;
+    return 100 - (100 / (1 + rs));
   }
 
   /**
@@ -52,86 +51,139 @@ export class QuickScalpStrategy {
   }
 
   /**
-   * Detect trend direction
+   * Check if RSI is trending in a direction over last N candles
+   * Returns 'UP', 'DOWN', or null
    */
-  detectTrend(candles) {
-    if (candles.length < 3) return null;
+  rsiTrend(closes, lookback = 3) {
+    if (closes.length < this.rsiPeriod + lookback + 1) return null;
 
-    const closes = candles.map(c => c.close);
-    const ma50 = this.calculateMA(closes, 50);
+    const rsiValues = [];
+    for (let i = lookback; i >= 0; i--) {
+      const slice = closes.slice(0, closes.length - i);
+      rsiValues.push(this.calculateRSI(slice, this.rsiPeriod));
+    }
+
+    if (rsiValues.some(v => v === null)) return null;
+
+    const first = rsiValues[0];
+    const last = rsiValues[rsiValues.length - 1];
+
+    if (last - first > 2) return 'UP';
+    if (first - last > 2) return 'DOWN';
+    return 'FLAT';
+  }
+
+  /**
+   * Detect trend direction using fast and slow MA
+   */
+  detectTrend(closes) {
+    const fastMA = this.calculateMA(closes, this.fastMaPeriod);
+    const slowMA = this.calculateMA(closes, this.maPeriod);
     const currentPrice = closes[closes.length - 1];
 
-    if (ma50 === null) return null;
+    if (fastMA === null || slowMA === null) return null;
 
-    // Simple trend: price above MA = uptrend, below = downtrend
-    if (currentPrice > ma50) return 'UP';
-    if (currentPrice < ma50) return 'DOWN';
+    // Strong uptrend: fast MA > slow MA and price above both
+    if (fastMA > slowMA && currentPrice > fastMA) return 'UP';
+    // Strong downtrend: fast MA < slow MA and price below both
+    if (fastMA < slowMA && currentPrice < fastMA) return 'DOWN';
+    // Weak uptrend: price above slow MA
+    if (currentPrice > slowMA) return 'UP';
+    // Weak downtrend: price below slow MA
+    if (currentPrice < slowMA) return 'DOWN';
+
     return null;
   }
 
   /**
-   * Generate trading signal
+   * Check for recent candle momentum (bullish or bearish candles)
+   */
+  candleMomentum(candles, lookback = 3) {
+    if (candles.length < lookback) return null;
+    const recent = candles.slice(-lookback);
+    const bullish = recent.filter(c => c.close > c.open).length;
+    const bearish = recent.filter(c => c.close < c.open).length;
+
+    if (bullish >= 2) return 'BULLISH';
+    if (bearish >= 2) return 'BEARISH';
+    return 'MIXED';
+  }
+
+  /**
+   * Generate trading signal - flexible multi-condition approach
+   * Any 2 of 3 conditions must align (not all 3 required)
    */
   analyzeSignal(candles, openTrades = 0) {
     if (candles.length < 30) {
       return { signal: 'NONE', reason: 'Insufficient data' };
     }
 
-    // Check max concurrent trades
     if (openTrades >= this.maxConcurrentTrades) {
       return { signal: 'NONE', reason: 'Max concurrent trades reached' };
     }
 
     const closes = candles.map(c => c.close);
-    const opens = candles.map(c => c.open);
-
-    // Calculate indicators
     const rsi = this.calculateRSI(closes, this.rsiPeriod);
-    const ma = this.calculateMA(closes, this.maPeriod);
-    const trend = this.detectTrend(candles);
+    const trend = this.detectTrend(closes);
+    const rsiDir = this.rsiTrend(closes, 3);
+    const momentum = this.candleMomentum(candles, 3);
 
-    if (rsi === null || ma === null || trend === null) {
+    if (rsi === null || trend === null) {
       return { signal: 'NONE', reason: 'Indicators not ready' };
     }
 
-    const currentPrice = closes[closes.length - 1];
-    const previousPrice = closes[closes.length - 2];
+    // ── BUY CONDITIONS ──────────────────────────────────────────────────
+    const buyConditions = {
+      trend: trend === 'UP',
+      rsiOversold: rsi < 45,          // RSI below midpoint (relaxed from 40)
+      rsiRising: rsiDir === 'UP',     // RSI trending upward
+      momentum: momentum === 'BULLISH',
+    };
 
-    // BUY Signal: Uptrend + RSI bounces from oversold + Price crosses MA
-    if (
-      trend === 'UP' &&
-      rsi < 40 &&
-      currentPrice > ma &&
-      previousPrice <= ma &&
-      rsi > 30
-    ) {
+    const buyScore = Object.values(buyConditions).filter(Boolean).length;
+
+    if (buyScore >= 2 && rsi < 55) {  // At least 2 conditions + RSI not overbought
+      const reasons = Object.entries(buyConditions)
+        .filter(([, v]) => v)
+        .map(([k]) => k)
+        .join(', ');
       return {
         signal: 'BUY',
-        reason: `Uptrend, RSI ${rsi.toFixed(1)} bounced from oversold, Price crossed MA`,
+        reason: `BUY: ${reasons} | RSI ${rsi.toFixed(1)}`,
         rsi,
-        ma,
         trend,
+        score: buyScore,
       };
     }
 
-    // SELL Signal: Downtrend + RSI bounces from overbought + Price crosses MA
-    if (
-      trend === 'DOWN' &&
-      rsi > 60 &&
-      currentPrice < ma &&
-      previousPrice >= ma &&
-      rsi < 70
-    ) {
+    // ── SELL CONDITIONS ─────────────────────────────────────────────────
+    const sellConditions = {
+      trend: trend === 'DOWN',
+      rsiOverbought: rsi > 55,        // RSI above midpoint (relaxed from 60)
+      rsiFalling: rsiDir === 'DOWN',  // RSI trending downward
+      momentum: momentum === 'BEARISH',
+    };
+
+    const sellScore = Object.values(sellConditions).filter(Boolean).length;
+
+    if (sellScore >= 2 && rsi > 45) {  // At least 2 conditions + RSI not oversold
+      const reasons = Object.entries(sellConditions)
+        .filter(([, v]) => v)
+        .map(([k]) => k)
+        .join(', ');
       return {
         signal: 'SELL',
-        reason: `Downtrend, RSI ${rsi.toFixed(1)} bounced from overbought, Price crossed MA`,
+        reason: `SELL: ${reasons} | RSI ${rsi.toFixed(1)}`,
         rsi,
-        ma,
         trend,
+        score: sellScore,
       };
     }
 
-    return { signal: 'NONE', reason: `RSI: ${rsi.toFixed(1)}, Trend: ${trend}` };
+    return {
+      signal: 'NONE',
+      reason: `No signal | RSI: ${rsi.toFixed(1)}, Trend: ${trend}, RSI dir: ${rsiDir}, Momentum: ${momentum}`,
+    };
   }
 
   /**
@@ -139,7 +191,7 @@ export class QuickScalpStrategy {
    */
   calculatePositionSize(pair, leverage = 25) {
     const riskAmount = this.accountBalance * this.positionSizePercent;
-    const units = (riskAmount * leverage) / 1; // Simplified for standard pairs
+    const units = (riskAmount * leverage) / 1;
     return Math.floor(units);
   }
 
@@ -148,8 +200,8 @@ export class QuickScalpStrategy {
    */
   getParameters() {
     return {
-      name: 'Quick Scalp',
-      description: 'High-frequency conservative scalping',
+      name: 'Quick Scalp (Active)',
+      description: 'High-frequency scalping - 2-of-4 conditions required',
       stopLossPips: this.stopLossPips,
       takeProfitPips: this.takeProfitPips,
       positionSizePercent: this.positionSizePercent * 100,
