@@ -243,6 +243,7 @@ export class BotEngine {
    */
   async analyzeAndTrade(symbol) {
     try {
+      console.log(`🔍 Scanning ${symbol}...`);
       // Check news filter before analyzing
       const newsCheck = await this.checkNewsFilter(symbol);
       if (newsCheck.blocked) {

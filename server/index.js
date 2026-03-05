@@ -96,9 +96,21 @@ async function initializeServer() {
       botConfig.userPhoneNumber = process.env.USER_PHONE_NUMBER;
     }
     botEngine = new BotEngine(botConfig);
-
     console.log('✅ Bot engine initialized');
     logStrategyConfig(botConfig);
+
+    // Auto-start bot if mode is full-auto
+    if (botConfig.botMode === 'full-auto') {
+      console.log('🚀 AUTO-START: full-auto mode detected - starting trading loop automatically...');
+      // Small delay to let server fully initialize before starting the loop
+      setTimeout(() => {
+        botEngine.start().catch(err => {
+          console.error('❌ Auto-start failed:', err.message);
+        });
+      }, 2000);
+    } else {
+      console.log(`ℹ️  Bot mode is "${botConfig.botMode}" - use /api/bot/start to begin trading`);
+    }
 
     // Initialize covered calls engine
     coveredCallsEngine = new CoveredCallsEngine();
