@@ -79,7 +79,8 @@ async function initializeServer() {
     });
 
     // Initialize bot engine - Twilio is optional
-    const defaultPairs = 'EUR/USD,GBP/USD,AUD/USD,USD/JPY,NZD/USD,XAU/USD,USD/CAD,GBP/JPY';
+    // OANDA live account supports forex pairs only (no metals/commodities like XAU/USD or WTI Oil)
+    const defaultPairs = 'EUR/USD,GBP/USD,AUD/USD,USD/JPY,NZD/USD,USD/CAD,GBP/JPY,EUR/GBP,USD/CHF';
     const tradingPairsEnv = process.env.TRADING_PAIRS || defaultPairs;
     const botConfig = {
       tradingCapital: parseInt(process.env.TRADING_CAPITAL || '100'),
