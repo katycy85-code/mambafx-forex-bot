@@ -267,6 +267,74 @@ export class OandaAPI {
   }
 
   /**
+   * Close a partial portion of a trade
+   * @param {string} tradeId - OANDA trade ID
+   * @param {number} units - Number of units to close (positive integer)
+   */
+  async closePartialTrade(tradeId, units) {
+    try {
+      const response = await fetch(
+        `${this.apiUrl}/v3/accounts/${this.accountId}/trades/${tradeId}/close`,
+        {
+          method: 'PUT',
+          headers: this.headers,
+          body: JSON.stringify({ units: units.toString() }),
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(`OANDA API error: ${error.errorMessage || response.statusText}`);
+      }
+
+      const data = await response.json();
+      return {
+        closePrice: parseFloat(data.orderFillTransaction.price),
+        pnl: parseFloat(data.orderFillTransaction.pl),
+        unitsClosed: units,
+      };
+    } catch (error) {
+      console.error(`Error partially closing trade ${tradeId}:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Move stop loss to breakeven (entry price) on an existing trade
+   * Replaces the trailing stop with a fixed stop at entry price
+   * @param {string} tradeId - OANDA trade ID
+   * @param {number} entryPrice - The original entry price
+   * @param {number} pipValue - Pip value for the pair (0.0001 or 0.01 for JPY)
+   */
+  async moveStopToBreakeven(tradeId, entryPrice, pipValue) {
+    try {
+      // Set a fixed stop loss at entry price + 1 pip buffer (to avoid immediate stop-out on spread)
+      const breakevenPrice = entryPrice;
+
+      const response = await fetch(
+        `${this.apiUrl}/v3/accounts/${this.accountId}/trades/${tradeId}/orders`,
+        {
+          method: 'PUT',
+          headers: this.headers,
+          body: JSON.stringify({
+            stopLoss: { price: breakevenPrice.toFixed(5) },
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(`OANDA API error: ${error.errorMessage || response.statusText}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error(`Error moving stop to breakeven for trade ${tradeId}:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Close a trade (fully)
    */
   async closeTrade(tradeId) {

@@ -468,9 +468,22 @@ export class BotEngine {
       await db.saveTrade(trade);
 
       // Add to open trades
+      const actualEntryPrice = order.entryPrice || signal.entryPrice;
+      const pipValue = symbol.includes('JPY') ? 0.01 : 0.0001;
+      const tpPips = takeProfitPips || 25;
+      const isBuyTrade = isBuy;
+      const tp25Price = isBuyTrade
+        ? actualEntryPrice + (tpPips * pipValue)
+        : actualEntryPrice - (tpPips * pipValue);
+
       this.openTrades.push({
         ...trade,
         orderId: order.orderId,
+        actualEntryPrice,
+        totalUnits: safeUnits,
+        remainingUnits: safeUnits,
+        tp25Price,           // price level for 50% close
+        pipValue,
         profitTargets,
         partialClosedAt: [],
         openedAt: Date.now(),
@@ -539,43 +552,30 @@ export class BotEngine {
           }
         }
 
-        // Check for profit targets (for trades without trailing stop or as additional management)
-        const isBuy = trade.direction === 'BUY' || trade.direction === 'BULLISH';
+        // ── PARTIAL CLOSE LOGIC ──────────────────────────────────────────
+        // At 25-pip target: close 50%, move stop to breakeven, let 50% run
+        const isBuyTrade = trade.direction === 'BUY' || trade.direction === 'BULLISH';
 
-        if (isBuy) {
-          // Check target 1 (1:3 ratio) - close 50%
-          if (
-            currentPrice >= trade.profitTargets?.target1 &&
-            !trade.partialClosedAt.includes('target1')
-          ) {
-            await this.closePartialTrade(trade, 0.5, 'target1');
-            trade.partialClosedAt.push('target1');
-          }
+        if (trade.tp25Price && !trade.partialClosedAt.includes('tp25')) {
+          const hitTP = isBuyTrade
+            ? currentPrice >= trade.tp25Price
+            : currentPrice <= trade.tp25Price;
 
-          // Check target 2 (1:5 ratio) - close 25%
-          if (
-            currentPrice >= trade.profitTargets?.target2 &&
-            !trade.partialClosedAt.includes('target2')
-          ) {
-            await this.closePartialTrade(trade, 0.25, 'target2');
-            trade.partialClosedAt.push('target2');
-          }
-        } else {
-          // SELL trade
-          if (
-            currentPrice <= trade.profitTargets?.target1 &&
-            !trade.partialClosedAt.includes('target1')
-          ) {
-            await this.closePartialTrade(trade, 0.5, 'target1');
-            trade.partialClosedAt.push('target1');
-          }
-
-          if (
-            currentPrice <= trade.profitTargets?.target2 &&
-            !trade.partialClosedAt.includes('target2')
-          ) {
-            await this.closePartialTrade(trade, 0.25, 'target2');
-            trade.partialClosedAt.push('target2');
+          if (hitTP) {
+            console.log(`🎯 ${trade.symbol}: Hit 25-pip target at ${currentPrice.toFixed(5)} — closing 50%, moving stop to breakeven`);
+            const closed = await this.closePartialTrade(trade, 0.5, 'tp25');
+            if (closed) {
+              trade.partialClosedAt.push('tp25');
+              // Move trailing stop to breakeven on remaining 50%
+              if (this.oanda && trade.orderId) {
+                try {
+                  await this.oanda.moveStopToBreakeven(trade.orderId, trade.actualEntryPrice, trade.pipValue);
+                  console.log(`🔒 ${trade.symbol}: Stop moved to breakeven at ${trade.actualEntryPrice.toFixed(5)}`);
+                } catch (err) {
+                  console.error(`Failed to move stop to breakeven for ${trade.symbol}:`, err.message);
+                }
+              }
+            }
           }
         }
       } catch (error) {
@@ -613,29 +613,42 @@ export class BotEngine {
   }
 
   /**
-   * Close partial trade
+   * Close partial trade - closes a percentage of the remaining units
+   * Returns true if successful
    */
   async closePartialTrade(trade, percentage, targetName) {
     try {
-      // Close order on OANDA
-      let result = { success: false };
-      if (this.oanda) {
-        try {
-          result = await this.oanda.closeTrade(trade.orderId);
-          result.success = true;
-        } catch (error) {
-          console.error(`Failed to close trade ${trade.tradeId}:`, error.message);
-          result.success = false;
-        }
+      const unitsToClose = Math.floor((trade.remainingUnits || trade.totalUnits || trade.positionSize) * percentage);
+      if (unitsToClose < 1) {
+        console.log(`Skipping partial close for ${trade.symbol} - units too small`);
+        return false;
       }
 
-      if (result.success) {
+      let success = false;
+      if (this.oanda) {
+        try {
+          await this.oanda.closePartialTrade(trade.orderId, unitsToClose);
+          success = true;
+        } catch (error) {
+          console.error(`Failed to partial close ${trade.symbol}:`, error.message);
+          return false;
+        }
+      } else {
+        // Simulation
+        success = true;
+      }
+
+      if (success) {
+        // Update remaining units on the trade object
+        trade.remainingUnits = (trade.remainingUnits || trade.totalUnits) - unitsToClose;
         console.log(
-          `✅ Partial close: ${trade.symbol} ${targetName} (${percentage * 100}%)`
+          `✅ Partial close: ${trade.symbol} ${targetName} — closed ${unitsToClose} units (${percentage * 100}%), ${trade.remainingUnits} units still running`
         );
       }
+      return success;
     } catch (error) {
       console.error('Error closing partial trade:', error);
+      return false;
     }
   }
 
