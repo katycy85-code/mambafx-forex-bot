@@ -778,9 +778,8 @@ export class BotEngine {
         }
       }
 
-      if (balance.success) {
+       if (balance.success) {
         this.accountBalance = balance.balance;
-
         // Save to history
         await db.saveAccountHistory({
           balance: balance.balance,
@@ -789,6 +788,18 @@ export class BotEngine {
           freeMargin: balance.freeMargin,
           dailyPnL: this.dailyPnL,
         });
+
+        // Update unrealized P&L for all open trades in the database
+        try {
+          const oandaTrades = await this.oanda.getOpenTrades();
+          for (const oandaTrade of oandaTrades) {
+            const symbol = oandaTrade.pair.replace('_', '/');
+            // Match by symbol and OPEN status - update the most recent open trade for this symbol
+            await db.updateOpenTradePnL(oandaTrade.id, oandaTrade.unrealizedPL, oandaTrade.currentPrice);
+          }
+        } catch (err) {
+          // Non-critical - don't crash the balance update if P&L sync fails
+        }
       }
     } catch (error) {
       console.error('Error updating account balance:', error);

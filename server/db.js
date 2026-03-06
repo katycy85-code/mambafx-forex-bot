@@ -163,6 +163,18 @@ export async function saveTrade(tradeData) {
 }
 
 /**
+ * Update unrealized P&L for an open trade (called every minute from OANDA live data)
+ */
+export async function updateOpenTradePnL(tradeId, unrealizedPL, currentPrice) {
+  await db.run(
+    `UPDATE trades SET
+      profitLoss = ?, updatedAt = CURRENT_TIMESTAMP
+    WHERE tradeId = ? AND status = 'OPEN'`,
+    [unrealizedPL, tradeId]
+  );
+}
+
+/**
  * Update trade with exit data
  */
 export async function closeTrade(tradeId, exitPrice, profitLoss) {
