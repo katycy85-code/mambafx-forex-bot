@@ -216,9 +216,26 @@ export class OandaAPI {
       }
 
       const data = await response.json();
+
+      // OANDA can return different transaction types:
+      // - orderFillTransaction: normal fill (most common)
+      // - orderCancelTransaction: order cancelled (e.g. insufficient margin)
+      // - relatedTransactionIDs: array of transaction IDs
+      // Handle all cases safely
+      const fill = data.orderFillTransaction;
+      if (!fill) {
+        // Log the full response to help diagnose
+        const cancelReason = data.orderCancelTransaction?.reason || JSON.stringify(data).slice(0, 200);
+        throw new Error(`Order not filled: ${cancelReason}`);
+      }
+
+      // tradeOpenedID is present when a new trade is opened
+      // tradeReducedID is present when an existing trade is reduced
+      const tradeId = fill.tradeOpenedID || fill.tradeReducedID || fill.id;
+
       return {
-        tradeId: data.orderFillTransaction.tradeOpenedID,
-        entryPrice: parseFloat(data.orderFillTransaction.price),
+        tradeId,
+        entryPrice: parseFloat(fill.price),
         units: units,
         takeProfit: takeProfit,
         stopLoss: stopLoss,

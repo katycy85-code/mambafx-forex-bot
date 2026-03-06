@@ -114,6 +114,38 @@ export class BotEngine {
       }
     }
 
+    // Sync open trades from OANDA on startup (restores state after redeploy)
+    if (this.oanda) {
+      try {
+        const oandaTrades = await this.oanda.getOpenTrades();
+        if (oandaTrades.length > 0) {
+          this.openTrades = oandaTrades.map(t => ({
+            tradeId: t.id,
+            orderId: t.id,
+            symbol: t.pair.replace('_', '/'),
+            direction: t.units > 0 ? 'BUY' : 'SELL',
+            actualEntryPrice: t.entryPrice,
+            entryPrice: t.entryPrice,
+            totalUnits: Math.abs(t.units),
+            remainingUnits: Math.abs(t.units),
+            positionSize: Math.abs(t.units),
+            pipValue: t.pair.includes('JPY') ? 0.01 : 0.0001,
+            tp25Price: t.units > 0
+              ? t.entryPrice + (25 * (t.pair.includes('JPY') ? 0.01 : 0.0001))
+              : t.entryPrice - (25 * (t.pair.includes('JPY') ? 0.01 : 0.0001)),
+            partialClosedAt: [],
+            openedAt: Date.now(),
+            profitTargets: {},
+          }));
+          console.log(`📂 Synced ${oandaTrades.length} open trade(s) from OANDA: ${this.openTrades.map(t => t.symbol).join(', ')}`);
+        } else {
+          console.log('📂 No open trades on OANDA to sync');
+        }
+      } catch (error) {
+        console.error('⚠️  Could not sync open trades from OANDA:', error.message);
+      }
+    }
+
     // Save bot status
     await db.saveBotSetting('botStatus', 'running');
 
