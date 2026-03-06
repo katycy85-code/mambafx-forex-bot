@@ -138,6 +138,29 @@ export class BotEngine {
             profitTargets: {},
           }));
           console.log(`📂 Synced ${oandaTrades.length} open trade(s) from OANDA: ${this.openTrades.map(t => t.symbol).join(', ')}`);
+
+          // Save synced trades to database so the dashboard Trades tab shows them
+          for (const trade of this.openTrades) {
+            try {
+              await db.saveTrade({
+                tradeId: trade.tradeId,
+                symbol: trade.symbol,
+                direction: trade.direction,
+                entryPrice: trade.entryPrice,
+                stopLoss: 15,
+                positionSize: trade.positionSize,
+                riskAmount: trade.positionSize * 0.0001 * 15,
+                confirmationCount: 0,
+                confirmations: [],
+                status: 'OPEN',
+              });
+            } catch (err) {
+              // Ignore duplicate key errors (trade already in DB from previous run)
+              if (!err.message?.includes('UNIQUE')) {
+                console.error(`Failed to save synced trade ${trade.symbol} to DB:`, err.message);
+              }
+            }
+          }
         } else {
           console.log('📂 No open trades on OANDA to sync');
         }
