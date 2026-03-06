@@ -134,7 +134,8 @@ export class BotEngine {
               ? t.entryPrice + (25 * (t.pair.includes('JPY') ? 0.01 : 0.0001))
               : t.entryPrice - (25 * (t.pair.includes('JPY') ? 0.01 : 0.0001)),
             partialClosedAt: [],
-            openedAt: Date.now(),
+            // Use actual OANDA openTime so max-hold-time check is accurate after redeploy
+            openedAt: t.openTime ? new Date(t.openTime).getTime() : Date.now(),
             profitTargets: {},
           }));
           console.log(`📂 Synced ${oandaTrades.length} open trade(s) from OANDA: ${this.openTrades.map(t => t.symbol).join(', ')}`);
@@ -184,8 +185,8 @@ export class BotEngine {
               positionSize: ct.units,
               riskAmount: ct.units * 0.0001 * 15,
               profitLoss: ct.realizedPL,
-              entryTime: ct.openTime ? new Date(parseFloat(ct.openTime) * 1000).toISOString() : new Date().toISOString(),
-              exitTime: ct.closeTime ? new Date(parseFloat(ct.closeTime) * 1000).toISOString() : new Date().toISOString(),
+              entryTime: ct.openTime ? new Date(ct.openTime).toISOString() : new Date().toISOString(),
+              exitTime: ct.closeTime ? new Date(ct.closeTime).toISOString() : new Date().toISOString(),
             });
             imported++;
           } catch (err) {
@@ -642,6 +643,24 @@ export class BotEngine {
               await this.closeFullTrade(trade, 'chop_exit');
               continue;
             }
+          }
+        }
+        // ── MAX HOLD TIME: force-close stale trades after 4 hours ──────────
+        const maxHoldMinutes = this.config.maxHoldMinutes || 240; // 4 hours default
+        if (timeInTradeMinutes >= maxHoldMinutes) {
+          const isBuy = trade.direction === 'BUY' || trade.direction === 'BULLISH';
+          const pipValue = trade.pipValue || 0.0001;
+          const priceDiff = isBuy
+            ? currentPrice - (trade.actualEntryPrice || currentPrice)
+            : (trade.actualEntryPrice || currentPrice) - currentPrice;
+          const pipsProfit = priceDiff / pipValue;
+          // Only force-close if not meaningfully in profit (< 5 pips)
+          if (pipsProfit < 5) {
+            console.log(`⏰ MAX HOLD: ${trade.symbol} open ${timeInTradeMinutes.toFixed(0)}min (>${maxHoldMinutes}min) | P&L: ${pipsProfit.toFixed(1)} pips — force closing`);
+            await this.closeFullTrade(trade, 'max_hold_time');
+            continue;
+          } else {
+            console.log(`⏰ MAX HOLD: ${trade.symbol} open ${timeInTradeMinutes.toFixed(0)}min but in profit (${pipsProfit.toFixed(1)} pips) — letting trailing stop manage`);
           }
         }
 
