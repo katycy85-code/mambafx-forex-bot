@@ -135,14 +135,14 @@ export class QuickScalpStrategy {
     // ── BUY CONDITIONS ──────────────────────────────────────────────────
     const buyConditions = {
       trend: trend === 'UP',
-      rsiOversold: rsi < 42,          // RSI must be below 42 (was 45 — too loose)
+      rsiOversold: rsi < 40,          // RSI must be below 40 (oversold territory)
       rsiRising: rsiDir === 'UP',     // RSI trending upward
       momentum: momentum === 'BULLISH',
     };
 
     const buyScore = Object.values(buyConditions).filter(Boolean).length;
 
-    if (buyScore >= 2 && rsi < 52) {  // At least 2 conditions + RSI not overbought (was 55)
+    if (buyScore >= 3 && rsi < 48) {  // Require 3-of-4 conditions + RSI clearly below midpoint
       const reasons = Object.entries(buyConditions)
         .filter(([, v]) => v)
         .map(([k]) => k)
@@ -159,14 +159,14 @@ export class QuickScalpStrategy {
     // ── SELL CONDITIONS ─────────────────────────────────────────────────
     const sellConditions = {
       trend: trend === 'DOWN',
-      rsiOverbought: rsi > 58,        // RSI must be above 58 (was 55 — too loose)
+      rsiOverbought: rsi > 60,        // RSI must be above 60 (overbought territory)
       rsiFalling: rsiDir === 'DOWN',  // RSI trending downward
       momentum: momentum === 'BEARISH',
     };
 
     const sellScore = Object.values(sellConditions).filter(Boolean).length;
 
-    if (sellScore >= 2 && rsi > 48) {  // At least 2 conditions + RSI not oversold (was 45)
+    if (sellScore >= 3 && rsi > 52) {  // Require 3-of-4 conditions + RSI clearly above midpoint
       const reasons = Object.entries(sellConditions)
         .filter(([, v]) => v)
         .map(([k]) => k)

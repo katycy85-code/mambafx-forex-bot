@@ -94,6 +94,8 @@ export class BotEngine {
     this.openTrades = [];
     this.dailyPnL = 0;
     this.accountBalance = this.config.tradingCapital;
+    // Per-pair cooldown: after a losing trade, wait 15 min before re-entering same pair
+    this.pairCooldowns = {}; // { 'EUR/USD': timestamp_when_cooldown_expires }
   }
 
   /**
@@ -337,6 +339,14 @@ export class BotEngine {
       const newsCheck = await this.checkNewsFilter(symbol);
       if (newsCheck.blocked) {
         return; // Skip this pair during news window
+      }
+
+      // Check per-pair cooldown (15 min after a losing trade)
+      const cooldownExpiry = this.pairCooldowns[symbol];
+      if (cooldownExpiry && Date.now() < cooldownExpiry) {
+        const minsLeft = Math.ceil((cooldownExpiry - Date.now()) / 60000);
+        console.log(`⏳ ${symbol} in cooldown — ${minsLeft}min remaining after last loss`);
+        return;
       }
 
       // Get 5M candles for both strategies
@@ -754,6 +764,13 @@ export class BotEngine {
 
         // Remove from open trades
         this.openTrades = this.openTrades.filter(t => t.tradeId !== trade.tradeId);
+
+        // Set 15-minute cooldown on this pair if trade closed at a loss
+        if (pnl < 0) {
+          const cooldownMs = 15 * 60 * 1000; // 15 minutes
+          this.pairCooldowns[trade.symbol] = Date.now() + cooldownMs;
+          console.log(`⏳ ${trade.symbol} cooldown set — 15min before re-entry (loss: $${pnl.toFixed(2)})`);
+        }
       }
     } catch (error) {
       console.error('Error closing full trade:', error);
