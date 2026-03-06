@@ -84,9 +84,9 @@ export default function Dashboard({ botStatus }) {
                   <th className="text-left py-3 px-4">Direction</th>
                   <th className="text-right py-3 px-4">Entry Price</th>
                   <th className="text-right py-3 px-4">Stop Loss</th>
-                  <th className="text-right py-3 px-4">Position Size</th>
+                  <th className="text-right py-3 px-4">P&L</th>
                   <th className="text-right py-3 px-4">Risk</th>
-                  <th className="text-left py-3 px-4">Entry Time</th>
+                  <th className="text-left py-3 px-4">Entry Time (ET)</th>
                 </tr>
               </thead>
               <tbody>
@@ -95,21 +95,29 @@ export default function Dashboard({ botStatus }) {
                     <td className="py-3 px-4 font-semibold">{trade.symbol}</td>
                     <td className="py-3 px-4">
                       <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                        trade.direction === 'BULLISH'
+                        (trade.direction === 'BULLISH' || trade.direction === 'BUY')
                           ? 'bg-green-500/20 text-green-400'
                           : 'bg-red-500/20 text-red-400'
                       }`}>
-                        {trade.direction}
+                        {trade.direction === 'BULLISH' ? 'BUY' : trade.direction === 'BEARISH' ? 'SELL' : trade.direction}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-right">{trade.entryPrice.toFixed(5)}</td>
-                    <td className="py-3 px-4 text-right">{trade.stopLoss.toFixed(5)}</td>
-                    <td className="py-3 px-4 text-right">{trade.positionSize.toFixed(2)}</td>
+                    <td className="py-3 px-4 text-right">{trade.entryPrice?.toFixed(5)}</td>
+                    <td className="py-3 px-4 text-right">{trade.stopLoss?.toFixed(5)}</td>
+                    <td className={`py-3 px-4 text-right font-semibold ${
+                      (trade.profitLoss || 0) >= 0 ? 'text-green-400' : 'text-red-400'
+                    }`}>
+                      {trade.profitLoss != null ? `$${trade.profitLoss.toFixed(2)}` : '$-'}
+                    </td>
                     <td className="py-3 px-4 text-right text-yellow-400">
-                      ${trade.riskAmount.toFixed(2)}
+                      ${trade.riskAmount?.toFixed(2)}
                     </td>
                     <td className="py-3 px-4">
-                      {new Date(trade.entryTime).toLocaleString()}
+                      {new Date(trade.entryTime).toLocaleString('en-US', {
+                        timeZone: 'America/New_York',
+                        month: 'numeric', day: 'numeric', year: 'numeric',
+                        hour: 'numeric', minute: '2-digit', hour12: true
+                      })} ET
                     </td>
                   </tr>
                 ))}

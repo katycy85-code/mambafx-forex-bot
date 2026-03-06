@@ -657,8 +657,18 @@ export class BotEngine {
       }
 
       if (result.success) {
-        console.log(`✅ Full close: ${trade.symbol} (${reason})`);
+        const exitPrice = result.closePrice || 0;
+        const pnl = result.pnl || 0;
+        console.log(`✅ Full close: ${trade.symbol} (${reason}) | P&L: $${pnl.toFixed(2)}`);
         
+        // Save closed trade to database
+        try {
+          await db.closeTrade(trade.tradeId, exitPrice, pnl);
+          this.dailyPnL += pnl;
+        } catch (dbErr) {
+          console.error(`Failed to save closed trade ${trade.symbol} to DB:`, dbErr.message);
+        }
+
         // Remove from open trades
         this.openTrades = this.openTrades.filter(t => t.tradeId !== trade.tradeId);
       }
@@ -789,13 +799,54 @@ export class BotEngine {
           dailyPnL: this.dailyPnL,
         });
 
-        // Update unrealized P&L for all open trades in the database
+        // Update unrealized P&L and reconcile closed trades
         try {
           const oandaTrades = await this.oanda.getOpenTrades();
+          const oandaTradeIds = new Set(oandaTrades.map(t => t.id));
+
+          // Update P&L for still-open trades
           for (const oandaTrade of oandaTrades) {
-            const symbol = oandaTrade.pair.replace('_', '/');
-            // Match by symbol and OPEN status - update the most recent open trade for this symbol
             await db.updateOpenTradePnL(oandaTrade.id, oandaTrade.unrealizedPL, oandaTrade.currentPrice);
+            // Store last known P&L on in-memory trade for reconciliation
+            const memTrade = this.openTrades.find(t => t.orderId === oandaTrade.id);
+            if (memTrade) {
+              memTrade.lastUnrealizedPL = oandaTrade.unrealizedPL;
+              memTrade.lastPrice = oandaTrade.currentPrice;
+            }
+          }
+
+          // Reconcile: find trades in our memory that OANDA has already closed (trailing stop, TP, etc.)
+          const closedByOanda = this.openTrades.filter(t => t.orderId && !oandaTradeIds.has(t.orderId));
+          for (const closedTrade of closedByOanda) {
+            console.log(`📋 ${closedTrade.symbol}: Closed by OANDA (trailing stop/TP) — recording to DB`);
+            try {
+              // We don't have the exact exit price, use last known price from P&L
+              const pnl = closedTrade.lastUnrealizedPL || 0;
+              await db.closeTrade(closedTrade.tradeId, closedTrade.lastPrice || closedTrade.actualEntryPrice || 0, pnl);
+              this.dailyPnL += pnl;
+            } catch (dbErr) {
+              console.error(`Failed to record OANDA-closed trade ${closedTrade.symbol}:`, dbErr.message);
+            }
+            // Remove from in-memory list
+            this.openTrades = this.openTrades.filter(t => t.tradeId !== closedTrade.tradeId);
+          }
+
+          // Also reconcile DB: mark any DB-open trades not in OANDA as closed
+          try {
+            const dbOpenTrades = await db.getOpenTrades();
+            for (const dbTrade of dbOpenTrades) {
+              if (!oandaTradeIds.has(dbTrade.tradeId)) {
+                // Check if it's in our memory (might be a synced trade without orderId)
+                const inMemory = this.openTrades.find(t => t.tradeId === dbTrade.tradeId);
+                if (!inMemory) {
+                  // Trade is in DB as OPEN but not in OANDA and not in memory — mark closed
+                  await db.closeTrade(dbTrade.tradeId, dbTrade.entryPrice, dbTrade.profitLoss || 0);
+                  console.log(`🔄 Reconciled stale DB trade: ${dbTrade.symbol} marked CLOSED`);
+                }
+              }
+            }
+          } catch (reconcileErr) {
+            // Non-critical
           }
         } catch (err) {
           // Non-critical - don't crash the balance update if P&L sync fails

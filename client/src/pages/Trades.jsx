@@ -82,11 +82,11 @@ export default function Trades() {
                     <td className="py-3 px-4 font-semibold">{trade.symbol}</td>
                     <td className="py-3 px-4">
                       <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                        trade.direction === 'BULLISH'
+                        (trade.direction === 'BULLISH' || trade.direction === 'BUY')
                           ? 'bg-green-500/20 text-green-400'
                           : 'bg-red-500/20 text-red-400'
                       }`}>
-                        {trade.direction}
+                        {trade.direction === 'BULLISH' ? 'BUY' : trade.direction === 'BEARISH' ? 'SELL' : trade.direction}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right">{trade.entryPrice?.toFixed(5)}</td>
@@ -114,7 +114,11 @@ export default function Trades() {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-sm">
-                      {new Date(trade.entryTime).toLocaleString()}
+                      {new Date(trade.entryTime).toLocaleString('en-US', {
+                        timeZone: 'America/New_York',
+                        month: 'numeric', day: 'numeric', year: 'numeric',
+                        hour: 'numeric', minute: '2-digit', hour12: true
+                      })} ET
                     </td>
                   </tr>
                 ))}
