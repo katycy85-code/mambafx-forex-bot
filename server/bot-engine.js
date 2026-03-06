@@ -77,7 +77,11 @@ export class BotEngine {
       console.log(`✅ Trailing stops enabled: ${this.config.trailingStopPips} pips (activates after ${this.config.trailingStopActivationPips || 8} pips profit)`);
     }
 
-    // Initialize Twilio notifications only if configured
+    // Twilio notifications DISABLED - set to null to prevent SMS charges
+    // To re-enable: remove the line below and uncomment the block
+    this.notifications = null;
+    console.log('ℹ️  Twilio notifications disabled (cost control)');
+    /* DISABLED - uncomment to re-enable Twilio
     if (config.twilioAccountSid && config.twilioAuthToken && config.twilioPhoneNumber) {
       this.notifications = new NotificationService(
         config.twilioAccountSid,
@@ -88,6 +92,7 @@ export class BotEngine {
       this.notifications = null;
       console.log('ℹ️  Twilio not configured - SMS notifications disabled');
     }
+    */
 
     this.userPhoneNumber = config.userPhoneNumber;
     this.isRunning = false;
