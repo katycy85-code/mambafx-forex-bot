@@ -565,6 +565,8 @@ export class BotEngine {
         riskAmount: positionSizing.riskAmount,
         confirmationCount: signal.confirmationCount,
         confirmations: signal.confirmations || [],
+        entryTime: new Date().toISOString(),  // explicit UTC ISO string
+        trailingStopPips: this.config.trailingStopPips || 20,
       };
 
       await db.saveTrade(trade);

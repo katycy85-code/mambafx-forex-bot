@@ -138,13 +138,19 @@ export async function saveTrade(tradeData) {
     riskAmount,
     confirmationCount,
     confirmations,
+    entryTime,
+    trailingStopPips,
   } = tradeData;
+
+  // Always store entryTime as explicit UTC ISO string with 'Z' suffix
+  // so the frontend can parse it correctly as UTC (not local time)
+  const entryTimeUTC = entryTime || new Date().toISOString();
 
   const result = await db.run(
     `INSERT INTO trades (
       tradeId, symbol, direction, entryPrice, stopLoss, positionSize,
-      riskAmount, status, confirmationCount, confirmations
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      riskAmount, status, confirmationCount, confirmations, entryTime, notes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       tradeId,
       symbol,
@@ -156,6 +162,8 @@ export async function saveTrade(tradeData) {
       'OPEN',
       confirmationCount,
       JSON.stringify(confirmations),
+      entryTimeUTC,
+      trailingStopPips ? `trailingStopPips:${trailingStopPips}` : null,
     ]
   );
 

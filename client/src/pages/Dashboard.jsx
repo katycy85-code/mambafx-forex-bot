@@ -108,9 +108,12 @@ export default function Dashboard({ botStatus }) {
                     </td>
                     <td className="py-3 px-4 text-right">{trade.entryPrice?.toFixed(5)}</td>
                     <td className="py-3 px-4 text-right text-gray-300">
-                      {trade.stopLoss != null && trade.stopLoss < 100
-                        ? `${trade.stopLoss} pips`
-                        : '20 pips'}
+                      {(() => {
+                        // Read trailingStopPips from notes field (stored as "trailingStopPips:20")
+                        const notesMatch = trade.notes && trade.notes.match(/trailingStopPips:(\d+)/);
+                        const pips = notesMatch ? notesMatch[1] : '20';
+                        return `${pips} pips`;
+                      })()}
                     </td>
                     <td className={`py-3 px-4 text-right font-semibold ${
                       trade.profitLoss == null ? 'text-gray-400' :
@@ -124,11 +127,16 @@ export default function Dashboard({ botStatus }) {
                       ${trade.riskAmount?.toFixed(2)}
                     </td>
                     <td className="py-3 px-4">
-                      {new Date(trade.entryTime).toLocaleString('en-US', {
-                        timeZone: 'America/New_York',
-                        month: 'numeric', day: 'numeric', year: 'numeric',
-                        hour: 'numeric', minute: '2-digit', hour12: true
-                      })} ET
+                      {(() => {
+                        // Ensure entryTime is parsed as UTC (add Z if missing)
+                        const raw = trade.entryTime || '';
+                        const utcStr = raw.endsWith('Z') || raw.includes('+') ? raw : raw + 'Z';
+                        return new Date(utcStr).toLocaleString('en-US', {
+                          timeZone: 'America/New_York',
+                          month: 'numeric', day: 'numeric', year: 'numeric',
+                          hour: 'numeric', minute: '2-digit', hour12: true
+                        });
+                      })()} ET
                     </td>
                   </tr>
                 ))}
