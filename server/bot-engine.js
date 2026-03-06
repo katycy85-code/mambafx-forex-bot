@@ -372,13 +372,36 @@ export class BotEngine {
     try {
       const tradeId = uuidv4();
 
-      // Calculate position size
-      const positionSizing = this.strategy.calculatePositionSize(
-        this.accountBalance,
-        signal.entryPrice,
-        signal.stopLoss,
-        this.config.leverage
-      );
+      // Determine direction: support both numeric (1/-1) and string ('BUY'/'SELL'/'BULLISH'/'BEARISH')
+      const isBuy = signal.direction === 1 ||
+        signal.direction === 'BUY' ||
+        signal.direction === 'BULLISH';
+
+      // Calculate position size in OANDA units
+      // Use simple fixed-fraction sizing: risk 2% of account per trade
+      // OANDA minimum is 1 unit; standard lot = 100,000 units
+      // With $199 account and 50x leverage: usable margin = ~$9,950
+      // Risk 2% = ~$4 per trade; at 15-pip SL on EUR/USD (~$1.50/pip for 1000 units)
+      // => trade ~2,500 units per trade (safe for small account)
+      const stopLossPips = typeof signal.stopLoss === 'number' && signal.stopLoss < 100
+        ? signal.stopLoss   // already in pips (e.g. 15)
+        : 15;               // fallback
+      const takeProfitPips = typeof signal.takeProfit === 'number' && signal.takeProfit < 200
+        ? signal.takeProfit
+        : 25;
+
+      // Fixed unit size: 2% of account * leverage / pip value
+      // For a $199 account: 2% = $3.98 risk, 15-pip SL
+      // pip value for 1000 units of EUR/USD ≈ $0.10/pip → need ~$3.98/($0.10*15) = 2,653 units
+      const riskDollars = this.accountBalance * 0.02;
+      const pipValuePer1000Units = symbol.includes('JPY') ? 0.0076 : 0.10; // approx USD per pip per 1000 units
+      const rawUnits = (riskDollars / (stopLossPips * pipValuePer1000Units)) * 1000;
+      const safeUnits = Math.max(1000, Math.min(Math.floor(rawUnits), 50000)); // clamp 1000–50000
+
+      const positionSizing = {
+        positionSize: safeUnits,
+        riskAmount: riskDollars,
+      };
 
       // Calculate profit targets
       const profitTargets = this.strategy.calculateProfitTargets(
@@ -387,18 +410,11 @@ export class BotEngine {
         signal.direction
       );
 
-      // Determine direction: support both numeric (1/-1) and string ('BUY'/'SELL'/'BULLISH'/'BEARISH')
-      const isBuy = signal.direction === 1 ||
-        signal.direction === 'BUY' ||
-        signal.direction === 'BULLISH';
-
       // Place order on OANDA
       let order = { success: false };
       if (this.oanda) {
         try {
-          const units = isBuy ? positionSizing.positionSize : -positionSizing.positionSize;
-          const takeProfitPips = signal.takeProfit || 25;
-          const stopLossPips = signal.stopLoss || 15;
+          const units = isBuy ? safeUnits : -safeUnits;
 
           // Use trailing stop if enabled
           const trailingStopPips = this.config.trailingStopEnabled
