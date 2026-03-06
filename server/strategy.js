@@ -380,8 +380,9 @@ export class MambafXStrategy {
     const priceMovement = Math.abs(closes[closes.length - 1] - closes[0]);
     const choppyRatio = priceMovement / (priceRange || 1);
 
-    // Chop if: small range + low volume + no clear direction
-    const isChopping = rangeRatio < 0.8 && volumeRatio < 1.0 && choppyRatio < 0.5;
+    // Chop if: VERY small range + VERY low volume + NO clear direction
+    // Tightened thresholds (was 0.8/1.0/0.5) to avoid false chop exits
+    const isChopping = rangeRatio < 0.5 && volumeRatio < 0.7 && choppyRatio < 0.3;
 
     return {
       isChopping,

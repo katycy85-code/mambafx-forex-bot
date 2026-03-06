@@ -642,14 +642,30 @@ export class BotEngine {
         const timeInTrade = Date.now() - (trade.openedAt || Date.now());
         const timeInTradeMinutes = timeInTrade / (1000 * 60);
         
-        if (timeInTradeMinutes >= 10) {
+        // Chop exit: only check after 60 minutes AND only if trade is in negative
+        // If trade is positive after 60 min, let the trailing stop manage the exit
+        if (timeInTradeMinutes >= 60) {
           const candles5M = await this.getCandles(trade.symbol, '5m', 20);
           if (candles5M.success) {
             const chopCheck = this.strategy.detectChop(candles5M.candles);
-            if (chopCheck.isChopping) {
-              console.log(`Chop detected - exiting ${trade.symbol} after ${timeInTradeMinutes.toFixed(1)}min`);
+            const isBuyForChop = trade.direction === 'BUY' || trade.direction === 'BULLISH';
+            const pipValueForChop = trade.pipValue || 0.0001;
+            const priceDiffForChop = isBuyForChop
+              ? currentPrice - (trade.actualEntryPrice || currentPrice)
+              : (trade.actualEntryPrice || currentPrice) - currentPrice;
+            const pipsProfitForChop = priceDiffForChop / pipValueForChop;
+            // Exit choppy trade at breakeven or small profit (up to +8 pips)
+            // Don't hold a choppy trade hoping for more — take the even or small win
+            // Only let it run if it's strongly in profit (>8 pips) — trailing stop manages those
+            if (chopCheck.isChopping && pipsProfitForChop < 8) {
+              const exitLabel = pipsProfitForChop >= 0
+                ? `+${pipsProfitForChop.toFixed(1)} pips (small win/even — taking it)`
+                : `${pipsProfitForChop.toFixed(1)} pips (cutting loser)`;
+              console.log(`Chop exit: ${trade.symbol} after ${timeInTradeMinutes.toFixed(1)}min | ${exitLabel}`);
               await this.closeFullTrade(trade, 'chop_exit');
               continue;
+            } else if (pipsProfitForChop >= 8) {
+              console.log(`Chop detected but ${trade.symbol} strongly positive (${pipsProfitForChop.toFixed(1)} pips) — trailing stop managing`);
             }
           }
         }
