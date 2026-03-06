@@ -29,7 +29,8 @@ export class BotEngine {
       nyCloseMinute: 0,
       // Trailing stop settings (in pips)
       trailingStopEnabled: true,
-      trailingStopPips: 10,       // 10 pips trailing stop for scalping
+      trailingStopPips: 20,       // 20 pips trailing stop - wider to avoid noise stop-outs
+      trailingStopActivationPips: 8, // Only activate trailing stop after 8 pips profit
       // News filter settings
       newsFilterEnabled: true,
       newsBlackoutMinutes: 30,    // 30 min before/after high-impact news
@@ -73,7 +74,7 @@ export class BotEngine {
 
     // Log trailing stop config
     if (this.config.trailingStopEnabled) {
-      console.log(`✅ Trailing stops enabled: ${this.config.trailingStopPips} pips`);
+      console.log(`✅ Trailing stops enabled: ${this.config.trailingStopPips} pips (activates after ${this.config.trailingStopActivationPips || 8} pips profit)`);
     }
 
     // Initialize Twilio notifications only if configured
@@ -120,7 +121,7 @@ export class BotEngine {
         const oandaTrades = await this.oanda.getOpenTrades();
         if (oandaTrades.length > 0) {
           this.openTrades = oandaTrades.map(t => ({
-            tradeId: t.id,
+            tradeId: t.id,   // Use OANDA's actual ID so updateOpenTradePnL() matches correctly
             orderId: t.id,
             symbol: t.pair.replace('_', '/'),
             direction: t.units > 0 ? 'BUY' : 'SELL',
@@ -144,7 +145,7 @@ export class BotEngine {
           for (const trade of this.openTrades) {
             try {
               await db.saveTrade({
-                tradeId: trade.tradeId,
+                tradeId: trade.tradeId,  // This is now the OANDA trade ID
                 symbol: trade.symbol,
                 direction: trade.direction,
                 entryPrice: trade.entryPrice,
@@ -464,7 +465,9 @@ export class BotEngine {
    */
   async executeTrade(symbol, signal) {
     try {
-      const tradeId = uuidv4();
+      // tradeId will be replaced with OANDA's actual trade ID after order fill
+      // so that updateOpenTradePnL() can match by tradeId correctly
+      let tradeId = uuidv4(); // temporary, overwritten below if OANDA order succeeds
 
       // Determine direction: support both numeric (1/-1) and string ('BUY'/'SELL'/'BULLISH'/'BEARISH')
       const isBuy = signal.direction === 1 ||
@@ -544,6 +547,11 @@ export class BotEngine {
           });
         }
         return;
+      }
+
+      // Use OANDA's actual trade ID so P&L updates match via updateOpenTradePnL()
+      if (order.orderId) {
+        tradeId = order.orderId;
       }
 
       // Save trade to database

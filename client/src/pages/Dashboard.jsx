@@ -54,8 +54,12 @@ export default function Dashboard({ botStatus }) {
 
         <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
           <div className="text-gray-400 text-sm">Daily P&L</div>
-          <div className="text-3xl font-bold text-yellow-400 mt-2">
-            ${(accountHistory[0]?.dailyPnL || 0).toFixed(2)}
+          <div className={`text-3xl font-bold mt-2 ${
+            (botStatus?.dailyPnL || accountHistory[0]?.dailyPnL || 0) >= 0
+              ? 'text-yellow-400' : 'text-red-400'
+          }`}>
+            {(botStatus?.dailyPnL || accountHistory[0]?.dailyPnL || 0) >= 0 ? '+' : ''}
+            ${Math.abs(botStatus?.dailyPnL || accountHistory[0]?.dailyPnL || 0).toFixed(2)}
           </div>
         </div>
 
@@ -83,7 +87,7 @@ export default function Dashboard({ botStatus }) {
                   <th className="text-left py-3 px-4">Symbol</th>
                   <th className="text-left py-3 px-4">Direction</th>
                   <th className="text-right py-3 px-4">Entry Price</th>
-                  <th className="text-right py-3 px-4">Stop Loss</th>
+                    <th className="text-right py-3 px-4">Trailing Stop</th>
                   <th className="text-right py-3 px-4">P&L</th>
                   <th className="text-right py-3 px-4">Risk</th>
                   <th className="text-left py-3 px-4">Entry Time (ET)</th>
@@ -103,11 +107,18 @@ export default function Dashboard({ botStatus }) {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right">{trade.entryPrice?.toFixed(5)}</td>
-                    <td className="py-3 px-4 text-right">{trade.stopLoss?.toFixed(5)}</td>
+                    <td className="py-3 px-4 text-right text-gray-300">
+                      {trade.stopLoss != null && trade.stopLoss < 100
+                        ? `${trade.stopLoss} pips`
+                        : '20 pips'}
+                    </td>
                     <td className={`py-3 px-4 text-right font-semibold ${
-                      (trade.profitLoss || 0) >= 0 ? 'text-green-400' : 'text-red-400'
+                      trade.profitLoss == null ? 'text-gray-400' :
+                      trade.profitLoss >= 0 ? 'text-green-400' : 'text-red-400'
                     }`}>
-                      {trade.profitLoss != null ? `$${trade.profitLoss.toFixed(2)}` : '$-'}
+                      {trade.profitLoss != null
+                        ? `${trade.profitLoss >= 0 ? '+' : ''}$${trade.profitLoss.toFixed(2)}`
+                        : <span className="text-gray-500 text-xs">updating...</span>}
                     </td>
                     <td className="py-3 px-4 text-right text-yellow-400">
                       ${trade.riskAmount?.toFixed(2)}

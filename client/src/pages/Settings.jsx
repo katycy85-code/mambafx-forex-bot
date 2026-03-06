@@ -6,6 +6,7 @@ export default function Settings() {
     maxDailyLoss: 5,
     maxDrawdown: 15,
     positionSizePercent: 25,
+    trailingStopPips: 20,
     userPhoneNumber: '+19179721327',
   });
   const [message, setMessage] = useState('');
@@ -114,6 +115,24 @@ export default function Settings() {
             />
             <p className="text-xs text-gray-400 mt-1">
               Maximum allowed drawdown from account peak
+            </p>
+          </div>
+
+          {/* Trailing Stop */}
+          <div>
+            <label className="block text-sm font-semibold mb-2">Trailing Stop Distance (pips)</label>
+            <input
+              type="number"
+              name="trailingStopPips"
+              value={settings.trailingStopPips}
+              onChange={handleChange}
+              min="10"
+              max="50"
+              step="1"
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-green-500"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              Distance the trailing stop follows behind price. 20 pips recommended — 10 pips is too tight and causes premature stop-outs.
             </p>
           </div>
 
