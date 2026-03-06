@@ -163,6 +163,30 @@ export async function saveTrade(tradeData) {
 }
 
 /**
+ * Save a trade that is already closed (for importing historical trades from OANDA)
+ * Uses INSERT OR IGNORE so duplicates are silently skipped
+ */
+export async function saveClosedTrade(tradeData) {
+  const {
+    tradeId, symbol, direction, entryPrice, exitPrice,
+    stopLoss, positionSize, riskAmount, profitLoss, entryTime, exitTime,
+  } = tradeData;
+  await db.run(
+    `INSERT OR IGNORE INTO trades (
+      tradeId, symbol, direction, entryPrice, exitPrice, stopLoss, positionSize,
+      riskAmount, status, profitLoss, confirmationCount, confirmations, entryTime, exitTime
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CLOSED', ?, 0, '[]', ?, ?)`,
+    [
+      tradeId, symbol, direction, entryPrice, exitPrice || entryPrice,
+      stopLoss || 15, positionSize, riskAmount || 0,
+      profitLoss || 0,
+      entryTime || new Date().toISOString(),
+      exitTime || new Date().toISOString(),
+    ]
+  );
+}
+
+/**
  * Update unrealized P&L for an open trade (called every minute from OANDA live data)
  */
 export async function updateOpenTradePnL(tradeId, unrealizedPL, currentPrice) {

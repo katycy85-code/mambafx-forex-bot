@@ -167,10 +167,42 @@ export class BotEngine {
       } catch (error) {
         console.error('⚠️  Could not sync open trades from OANDA:', error.message);
       }
+      // Import historical closed trades from OANDA into DB (for Closed tab)
+      try {
+        const closedTrades = await this.oanda.getRecentClosedTrades(100);
+        let imported = 0;
+        for (const ct of closedTrades) {
+          try {
+            // Save as a closed trade — ignore duplicates silently
+            await db.saveClosedTrade({
+              tradeId: `oanda-${ct.tradeId}`,
+              symbol: ct.instrument,
+              direction: ct.direction,
+              entryPrice: ct.entryPrice,
+              exitPrice: ct.exitPrice,
+              stopLoss: 15,
+              positionSize: ct.units,
+              riskAmount: ct.units * 0.0001 * 15,
+              profitLoss: ct.realizedPL,
+              entryTime: ct.openTime ? new Date(parseFloat(ct.openTime) * 1000).toISOString() : new Date().toISOString(),
+              exitTime: ct.closeTime ? new Date(parseFloat(ct.closeTime) * 1000).toISOString() : new Date().toISOString(),
+            });
+            imported++;
+          } catch (err) {
+            if (!err.message?.includes('UNIQUE')) {
+              // Ignore duplicate key errors silently
+            }
+          }
+        }
+        if (imported > 0) {
+          console.log(`📋 Imported ${imported} historical closed trade(s) from OANDA into DB`);
+        }
+      } catch (err) {
+        console.error('⚠️  Could not import closed trades from OANDA:', err.message);
+      }
     }
-
     // Save bot status
-    await db.saveBotSetting('botStatus', 'running');
+    await db.saveBotSetting('botStatus', 'running');;
 
     // Send start notification if Twilio is configured
     if (this.notifications) {
@@ -415,6 +447,12 @@ export class BotEngine {
         }
       }
     } else if (this.config.botMode === 'full-auto') {
+      // Check global max concurrent trades before executing
+      const maxTrades = this.quickScalpStrategy?.maxConcurrentTrades || 3;
+      if (this.openTrades.length >= maxTrades) {
+        // Silently skip - don't log every scan to avoid spam
+        return;
+      }
       // Execute trade automatically
       await this.executeTrade(symbol, signal);
     }

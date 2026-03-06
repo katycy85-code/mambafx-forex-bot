@@ -410,6 +410,37 @@ export class OandaAPI {
       throw error;
     }
   }
+
+  /**
+   * Fetch recently closed trades from OANDA transaction history
+   * Uses the /trades?state=CLOSED endpoint for accurate closed trade data
+   */
+  async getRecentClosedTrades(count = 50) {
+    try {
+      const response = await fetch(
+        `${this.apiUrl}/v3/accounts/${this.accountId}/trades?state=CLOSED&count=${count}`,
+        { headers: this.headers }
+      );
+      if (!response.ok) {
+        throw new Error(`OANDA API error: ${response.status}`);
+      }
+      const data = await response.json();
+      return (data.trades || []).map(trade => ({
+        tradeId: trade.id,
+        instrument: trade.instrument.replace('_', '/'),
+        units: Math.abs(parseInt(trade.initialUnits || 0)),
+        direction: parseInt(trade.initialUnits) > 0 ? 'BUY' : 'SELL',
+        entryPrice: parseFloat(trade.price || 0),
+        exitPrice: parseFloat(trade.averageClosePrice || trade.price || 0),
+        realizedPL: parseFloat(trade.realizedPL || 0),
+        openTime: trade.openTime,
+        closeTime: trade.closeTime,
+      }));
+    } catch (error) {
+      console.error('Error fetching closed trades from OANDA:', error.message);
+      return [];
+    }
+  }
 }
 
 export default OandaAPI;
