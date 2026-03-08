@@ -305,6 +305,9 @@ export class OandaAPI {
       }
 
       const data = await response.json();
+      if (!data.orderFillTransaction) {
+        throw new Error(`Order not filled: ${data.orderCancelTransaction?.reason || 'Unknown reason'}`);
+      }
       return {
         closePrice: parseFloat(data.orderFillTransaction.price),
         pnl: parseFloat(data.orderFillTransaction.pl),
@@ -371,6 +374,9 @@ export class OandaAPI {
       }
 
       const data = await response.json();
+      if (!data.orderFillTransaction) {
+        throw new Error(`Order not filled: ${data.orderCancelTransaction?.reason || 'Unknown reason'}`);
+      }
       return {
         closePrice: parseFloat(data.orderFillTransaction.price),
         pnl: parseFloat(data.orderFillTransaction.pl),

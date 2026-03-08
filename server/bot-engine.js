@@ -251,9 +251,64 @@ export class BotEngine {
   /**
    * Main trading loop
    */
+  /**
+   * Handle trades before weekend close (Friday 4:30 PM EST)
+   * - Close losing/stale trades
+   * - Move SL to breakeven and take partial profit for winning trades
+   */
+  async handleWeekendTrades() {
+    const now = new Date();
+    const dayOfWeek = now.getUTCDay(); // 0 = Sunday, 5 = Friday, 6 = Saturday
+    const utcHour = now.getUTCHours();
+    const utcMinute = now.getUTCMinutes();
+
+    // Check if it's Friday and after 4:30 PM EST (20:30 UTC)
+    if (dayOfWeek === 5 && (utcHour > 20 || (utcHour === 20 && utcMinute >= 30))) {
+      console.log('⏰ Friday 4:30 PM EST: Initiating Smart Weekend Management...');
+
+      for (let i = this.openTrades.length - 1; i >= 0; i--) {
+        const trade = this.openTrades[i];
+        try {
+          const quote = await this.oanda.getPrice(trade.symbol);
+          const currentPrice = (quote.bid + quote.ask) / 2;
+          const pipValue = trade.pipValue || 0.0001;
+          const isBuy = trade.direction === 'BUY' || trade.direction === 'BULLISH';
+          const priceDiff = isBuy
+            ? currentPrice - (trade.actualEntryPrice || currentPrice)
+            : (trade.actualEntryPrice || currentPrice) - currentPrice;
+          const pipsProfit = priceDiff / pipValue;
+
+          if (pipsProfit >= 10) { // Winning trade: > 10 pips profit
+            console.log(`✅ ${trade.symbol}: Profit > 10 pips (${pipsProfit.toFixed(1)} pips). Moving SL to breakeven and taking 50% partial profit.`);
+            // Move SL to breakeven
+            await this.oanda.moveStopToBreakeven(trade.tradeId, trade.actualEntryPrice, pipValue);
+            // Take 50% partial profit
+            const unitsToClose = Math.floor(trade.remainingUnits / 2);
+            if (unitsToClose > 0) {
+              await this.oanda.closePartialTrade(trade.tradeId, unitsToClose);
+              trade.remainingUnits -= unitsToClose;
+              console.log(`💰 ${trade.symbol}: Closed ${unitsToClose} units (50% partial profit).`);
+            }
+          } else { // Losing or small profit trade: close it
+            console.log(`❌ ${trade.symbol}: Profit < 10 pips (${pipsProfit.toFixed(1)} pips). Closing trade.`);
+            await this.closeFullTrade(trade, 'weekend_close');
+          }
+        } catch (error) {
+          console.error(`Error during weekend trade management for ${trade.symbol}:`, error.message);
+        }
+      }
+    }
+  }
+
+  /**
+   * Main trading loop
+   */
   async startTradingLoop() {
     while (this.isRunning) {
       try {
+        // Run weekend trade management first
+        await this.handleWeekendTrades();
+
         // Trade 24/7 (volume filter will prevent low-liquidity trades)
         for (const pair of this.config.tradingPairs) {
           await this.analyzeAndTrade(pair);
@@ -268,7 +323,7 @@ export class BotEngine {
         // Sleep for 1 minute before next scan
         await this.sleep(60000);
       } catch (error) {
-        console.error('Bot Error:', error);
+        console.error("Bot Error:", error);
         if (this.notifications) {
           await this.notifications.notifyError(this.userPhoneNumber, {
             message: error.message,
