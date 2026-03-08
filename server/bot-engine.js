@@ -563,7 +563,34 @@ export class BotEngine {
       const riskDollars = this.accountBalance * 0.02;
       const pipValuePer1000Units = symbol.includes('JPY') ? 0.0076 : 0.10; // approx USD per pip per 1000 units
       const rawUnits = (riskDollars / (stopLossPips * pipValuePer1000Units)) * 1000;
-      const safeUnits = Math.max(1000, Math.min(Math.floor(rawUnits), 50000)); // clamp 1000–50000
+      let safeUnits = Math.max(1000, Math.min(Math.floor(rawUnits), 50000)); // clamp 1000–50000
+
+      // MARGIN-AWARE CHECK: Reduce units if margin exceeds 30% of balance
+      let accountDetails = { marginAvailable: this.accountBalance };
+      if (this.oanda) {
+        try {
+          accountDetails = await this.oanda.getAccountDetails();
+        } catch (error) {
+          // Continue with default if fetch fails
+        }
+      }
+
+      // Estimate margin: 1% of notional value for 100:1 leverage
+      const currentPrice = signal.entryPrice || 1.0;
+      const notionalValue = (safeUnits / 1000) * currentPrice * 1000;
+      const estimatedMarginRequired = notionalValue * 0.01;
+      const maxMarginPerTrade = this.accountBalance * 0.30;
+
+      if (estimatedMarginRequired > maxMarginPerTrade) {
+        const maxUnitsForMargin = Math.floor((maxMarginPerTrade / 0.01) / currentPrice * 1000);
+        safeUnits = Math.max(1000, Math.min(maxUnitsForMargin, 50000));
+        console.log(`⚠️  Margin cap applied for ${symbol}: margin $${estimatedMarginRequired.toFixed(2)} exceeds limit`);
+      }
+
+      if (accountDetails.marginAvailable < estimatedMarginRequired) {
+        console.warn(`❌ Insufficient margin for ${symbol}: need $${estimatedMarginRequired.toFixed(2)}, have $${accountDetails.marginAvailable.toFixed(2)}`);
+        return;
+      }
 
       const positionSizing = {
         positionSize: safeUnits,
