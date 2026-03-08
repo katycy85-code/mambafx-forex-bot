@@ -659,9 +659,9 @@ export class BotEngine {
         const timeInTrade = Date.now() - (trade.openedAt || Date.now());
         const timeInTradeMinutes = timeInTrade / (1000 * 60);
         
-        // Chop exit: only check after 60 minutes AND only if trade is in negative
-        // If trade is positive after 60 min, let the trailing stop manage the exit
-        if (timeInTradeMinutes >= 60) {
+        // Chop exit: increased to 120 minutes to give trades more time to develop
+        // Only exit if trade is in loss or very small profit (< 2 pips)
+        if (timeInTradeMinutes >= 120) {
           const candles5M = await this.getCandles(trade.symbol, '5m', 20);
           if (candles5M.success) {
             const chopCheck = this.strategy.detectChop(candles5M.candles);
@@ -671,18 +671,15 @@ export class BotEngine {
               ? currentPrice - (trade.actualEntryPrice || currentPrice)
               : (trade.actualEntryPrice || currentPrice) - currentPrice;
             const pipsProfitForChop = priceDiffForChop / pipValueForChop;
-            // Exit choppy trade at breakeven or small profit (up to +8 pips)
-            // Don't hold a choppy trade hoping for more — take the even or small win
-            // Only let it run if it's strongly in profit (>8 pips) — trailing stop manages those
-            if (chopCheck.isChopping && pipsProfitForChop < 8) {
+            
+            // Only exit if choppy AND not meaningfully in profit
+            if (chopCheck.isChopping && pipsProfitForChop < 2) {
               const exitLabel = pipsProfitForChop >= 0
-                ? `+${pipsProfitForChop.toFixed(1)} pips (small win/even — taking it)`
-                : `${pipsProfitForChop.toFixed(1)} pips (cutting loser)`;
+                ? `+${pipsProfitForChop.toFixed(1)} pips (stale trade — taking small profit/even)`
+                : `${pipsProfitForChop.toFixed(1)} pips (cutting stale loser)`;
               console.log(`Chop exit: ${trade.symbol} after ${timeInTradeMinutes.toFixed(1)}min | ${exitLabel}`);
               await this.closeFullTrade(trade, 'chop_exit');
               continue;
-            } else if (pipsProfitForChop >= 8) {
-              console.log(`Chop detected but ${trade.symbol} strongly positive (${pipsProfitForChop.toFixed(1)} pips) — trailing stop managing`);
             }
           }
         }

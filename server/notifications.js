@@ -135,26 +135,13 @@ Time: ${new Date().toLocaleString()}
    * Send generic SMS
    */
   async sendSMS(toNumber, message) {
-    try {
-      const result = await this.client.messages.create({
-        body: message,
-        from: this.fromNumber,
-        to: toNumber,
-      });
-
-      return {
-        success: true,
-        messageSid: result.sid,
-        message,
-      };
-    } catch (error) {
-      console.error('SMS Error:', error);
-      return {
-        success: false,
-        error: error.message,
-        message,
-      };
-    }
+    // TWILIO FULLY DISABLED TO PREVENT COSTS
+    console.log('ℹ️  Twilio notification suppressed (disabled):', message.split('\n')[0]);
+    return {
+      success: true,
+      messageSid: 'suppressed',
+      message,
+    };
   }
 
   /**

@@ -9,10 +9,10 @@
 export class QuickScalpStrategy {
   constructor(accountBalance) {
     this.accountBalance = accountBalance;
-    this.positionSizePercent = 0.05; // 5% per trade
-    this.stopLossPips = 15;
-    this.takeProfitPips = 25;
-    this.maxConcurrentTrades = 3;
+    this.positionSizePercent = 0.02; // Reduced to 2% per trade for better risk management
+    this.stopLossPips = 20;          // Increased SL to 20 pips to avoid noise stop-outs
+    this.takeProfitPips = 40;        // Increased TP to 40 pips for better R:R (1:2)
+    this.maxConcurrentTrades = 2;    // Reduced concurrent trades to focus on quality
     this.rsiPeriod = 14;
     this.maPeriod = 20;
     this.fastMaPeriod = 8;
@@ -135,14 +135,15 @@ export class QuickScalpStrategy {
     // ── BUY CONDITIONS ──────────────────────────────────────────────────
     const buyConditions = {
       trend: trend === 'UP',
-      rsiOversold: rsi < 40,          // RSI must be below 40 (oversold territory)
+      rsiOversold: rsi < 35,          // Tightened RSI threshold (was 40)
       rsiRising: rsiDir === 'UP',     // RSI trending upward
       momentum: momentum === 'BULLISH',
     };
 
     const buyScore = Object.values(buyConditions).filter(Boolean).length;
 
-    if (buyScore >= 3 && rsi < 48) {  // Require 3-of-4 conditions + RSI clearly below midpoint
+    // Require ALL 4 conditions for higher probability (was 3-of-4)
+    if (buyScore >= 4 && rsi < 45) {
       const reasons = Object.entries(buyConditions)
         .filter(([, v]) => v)
         .map(([k]) => k)
@@ -159,14 +160,15 @@ export class QuickScalpStrategy {
     // ── SELL CONDITIONS ─────────────────────────────────────────────────
     const sellConditions = {
       trend: trend === 'DOWN',
-      rsiOverbought: rsi > 60,        // RSI must be above 60 (overbought territory)
+      rsiOverbought: rsi > 65,        // Tightened RSI threshold (was 60)
       rsiFalling: rsiDir === 'DOWN',  // RSI trending downward
       momentum: momentum === 'BEARISH',
     };
 
     const sellScore = Object.values(sellConditions).filter(Boolean).length;
 
-    if (sellScore >= 3 && rsi > 52) {  // Require 3-of-4 conditions + RSI clearly above midpoint
+    // Require ALL 4 conditions for higher probability (was 3-of-4)
+    if (sellScore >= 4 && rsi > 55) {
       const reasons = Object.entries(sellConditions)
         .filter(([, v]) => v)
         .map(([k]) => k)
