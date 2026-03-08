@@ -2,7 +2,7 @@
  * Quick Scalp Strategy - Active Edition
  * High-frequency scalping strategy designed to trade multiple times per day
  * Uses RSI momentum + trend + price action - no strict crossover required
- * Risk: 15 pips SL, 25 pips TP (1:1.67 R:R)
+ * Risk: 15 pips Trailing SL, 25 pips TP (50% partial close)
  * Position: 5% of account per trade
  */
 
@@ -10,8 +10,8 @@ export class QuickScalpStrategy {
   constructor(accountBalance) {
     this.accountBalance = accountBalance;
     this.positionSizePercent = 0.05; // 5% per trade for capital utilization
-    this.stopLossPips = 20;          // 20 pips SL to avoid noise stop-outs
-    this.takeProfitPips = 40;        // 40 pips TP for better R:R (1:2)
+    this.stopLossPips = 15;          // 15 pips SL (Trailing)
+    this.takeProfitPips = 25;        // 25 pips TP for 50% partial close
     this.maxConcurrentTrades = 4;    // 4 concurrent trades to capitalize on multiple opportunities
     this.rsiPeriod = 14;
     this.maPeriod = 20;
@@ -154,6 +154,8 @@ export class QuickScalpStrategy {
         rsi,
         trend,
         score: buyScore,
+        stopLoss: this.stopLossPips,
+        takeProfit: this.takeProfitPips,
       };
     }
 
@@ -179,6 +181,8 @@ export class QuickScalpStrategy {
         rsi,
         trend,
         score: sellScore,
+        stopLoss: this.stopLossPips,
+        takeProfit: this.takeProfitPips,
       };
     }
 
@@ -203,7 +207,7 @@ export class QuickScalpStrategy {
   getParameters() {
     return {
       name: 'Quick Scalp (Active)',
-      description: 'High-frequency scalping - 2-of-4 conditions required',
+      description: 'High-frequency scalping - 3-of-4 conditions required',
       stopLossPips: this.stopLossPips,
       takeProfitPips: this.takeProfitPips,
       positionSizePercent: this.positionSizePercent * 100,

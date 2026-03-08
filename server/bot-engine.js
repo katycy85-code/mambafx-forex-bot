@@ -29,8 +29,8 @@ export class BotEngine {
       nyCloseMinute: 0,
       // Trailing stop settings (in pips)
       trailingStopEnabled: true,
-      trailingStopPips: 20,       // 20 pips trailing stop - wider to avoid noise stop-outs
-      trailingStopActivationPips: 8, // Only activate trailing stop after 8 pips profit
+      trailingStopPips: 15,       // 15 pips trailing stop as requested
+      trailingStopActivationPips: 0, // Activate trailing stop immediately to lock in profit early
       // News filter settings
       newsFilterEnabled: true,
       newsBlackoutMinutes: 30,    // 30 min before/after high-impact news
@@ -611,8 +611,9 @@ export class BotEngine {
           const units = isBuy ? safeUnits : -safeUnits;
 
           // Use trailing stop if enabled
+          // Use trailing stop if enabled (15 pips for Quick Scalp)
           const trailingStopPips = this.config.trailingStopEnabled
-            ? this.config.trailingStopPips
+            ? 15
             : null;
 
           const result = await this.oanda.placeOrder(
