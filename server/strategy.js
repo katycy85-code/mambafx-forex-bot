@@ -349,6 +349,107 @@ export class MambafXStrategy {
   }
 
   /**
+   * Calculate ATR (Average True Range)
+   */
+  calculateATR(candles, period = 14) {
+    if (candles.length < period + 1) return null;
+
+    const trueRanges = [];
+    for (let i = 1; i < candles.length; i++) {
+      const current = candles[i];
+      const previous = candles[i - 1];
+
+      const tr1 = current.high - current.low;
+      const tr2 = Math.abs(current.high - previous.close);
+      const tr3 = Math.abs(current.low - previous.close);
+
+      trueRanges.push(Math.max(tr1, tr2, tr3));
+    }
+
+    const atrValues = [];
+    let sum = 0;
+    for (let i = 0; i < period; i++) {
+      sum += trueRanges[i];
+    }
+    atrValues.push(sum / period);
+
+    for (let i = period; i < trueRanges.length; i++) {
+      const atr = (atrValues[atrValues.length - 1] * (period - 1) + trueRanges[i]) / period;
+      atrValues.push(atr);
+    }
+
+    return atrValues[atrValues.length - 1];
+  }
+
+  /**
+   * Detect Previous Day High/Low (PDH/PDL) rejection
+   * Requires daily candles to identify PDH/PDL levels
+   */
+  detectPDHPDLRejection(dailyCandles, currentPrice, direction) {
+    if (!dailyCandles || dailyCandles.length < 2) {
+      return { isRejection: false, reason: 'Insufficient daily data' };
+    }
+
+    const yesterday = dailyCandles[dailyCandles.length - 2];
+    const pdh = yesterday.high;
+    const pdl = yesterday.low;
+    const pipValue = 0.0001; // Standard forex pip value
+
+    if (direction === 'SELL') {
+      // Check if price is near PDH and showing rejection (bearish candle)
+      const distanceToPDH = Math.abs(currentPrice - pdh) / pipValue;
+      if (distanceToPDH < 10) { // Within 10 pips of PDH
+        return {
+          isRejection: true,
+          level: pdh,
+          distance: distanceToPDH,
+          type: 'PDH_REJECTION',
+          reason: `Price near PDH (${distanceToPDH.toFixed(1)} pips away)`,
+        };
+      }
+    } else if (direction === 'BUY') {
+      // Check if price is near PDL and showing rejection (bullish candle)
+      const distanceToPDL = Math.abs(currentPrice - pdl) / pipValue;
+      if (distanceToPDL < 10) { // Within 10 pips of PDL
+        return {
+          isRejection: true,
+          level: pdl,
+          distance: distanceToPDL,
+          type: 'PDL_REJECTION',
+          reason: `Price near PDL (${distanceToPDL.toFixed(1)} pips away)`,
+        };
+      }
+    }
+
+    return { isRejection: false, reason: 'Price not near PDH/PDL' };
+  }
+
+  /**
+   * Check if market is choppy based on ATR volatility
+   * Returns true if ATR is significantly below average (low volatility = chop)
+   */
+  isChoppyByATR(candles, period = 14, lookback = 50) {
+    if (candles.length < lookback + period) return false;
+
+    const recentCandles = candles.slice(-lookback);
+    const atrValues = [];
+
+    for (let i = 0; i < recentCandles.length - period; i++) {
+      const slice = recentCandles.slice(i, i + period + 1);
+      const atr = this.calculateATR(slice, period);
+      if (atr) atrValues.push(atr);
+    }
+
+    if (atrValues.length === 0) return false;
+
+    const currentATR = atrValues[atrValues.length - 1];
+    const avgATR = atrValues.reduce((a, b) => a + b, 0) / atrValues.length;
+    const atrRatio = currentATR / avgATR;
+
+    // Market is choppy if current ATR is below 60% of average
+    return atrRatio < 0.6;
+  }
+}  /**
    * Detect choppy/sideways market (no clear direction)
    */
   detectChop(candles, lookback = 10) {

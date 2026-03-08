@@ -9,10 +9,10 @@
 export class QuickScalpStrategy {
   constructor(accountBalance) {
     this.accountBalance = accountBalance;
-    this.positionSizePercent = 0.02; // Reduced to 2% per trade for better risk management
-    this.stopLossPips = 20;          // Increased SL to 20 pips to avoid noise stop-outs
-    this.takeProfitPips = 40;        // Increased TP to 40 pips for better R:R (1:2)
-    this.maxConcurrentTrades = 2;    // Reduced concurrent trades to focus on quality
+    this.positionSizePercent = 0.05; // 5% per trade for capital utilization
+    this.stopLossPips = 20;          // 20 pips SL to avoid noise stop-outs
+    this.takeProfitPips = 40;        // 40 pips TP for better R:R (1:2)
+    this.maxConcurrentTrades = 4;    // 4 concurrent trades to capitalize on multiple opportunities
     this.rsiPeriod = 14;
     this.maPeriod = 20;
     this.fastMaPeriod = 8;
@@ -142,8 +142,8 @@ export class QuickScalpStrategy {
 
     const buyScore = Object.values(buyConditions).filter(Boolean).length;
 
-    // Require ALL 4 conditions for higher probability (was 3-of-4)
-    if (buyScore >= 4 && rsi < 45) {
+    // Require 3-of-4 conditions for balanced entry (quality + activity)
+    if (buyScore >= 3 && rsi < 45) {
       const reasons = Object.entries(buyConditions)
         .filter(([, v]) => v)
         .map(([k]) => k)
@@ -167,8 +167,8 @@ export class QuickScalpStrategy {
 
     const sellScore = Object.values(sellConditions).filter(Boolean).length;
 
-    // Require ALL 4 conditions for higher probability (was 3-of-4)
-    if (sellScore >= 4 && rsi > 55) {
+    // Require 3-of-4 conditions for balanced entry (quality + activity)
+    if (sellScore >= 3 && rsi > 55) {
       const reasons = Object.entries(sellConditions)
         .filter(([, v]) => v)
         .map(([k]) => k)

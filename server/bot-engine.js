@@ -659,27 +659,31 @@ export class BotEngine {
         const timeInTrade = Date.now() - (trade.openedAt || Date.now());
         const timeInTradeMinutes = timeInTrade / (1000 * 60);
         
-        // Chop exit: increased to 120 minutes to give trades more time to develop
-        // Only exit if trade is in loss or very small profit (< 2 pips)
-        if (timeInTradeMinutes >= 120) {
-          const candles5M = await this.getCandles(trade.symbol, '5m', 20);
+        // ATR-based chop detection: exit if market volatility drops significantly
+        // This prevents holding trades in low-volume, choppy conditions
+        if (timeInTradeMinutes >= 30) { // Check after 30 minutes minimum
+          const candles5M = await this.getCandles(trade.symbol, '5m', 50);
           if (candles5M.success) {
-            const chopCheck = this.strategy.detectChop(candles5M.candles);
-            const isBuyForChop = trade.direction === 'BUY' || trade.direction === 'BULLISH';
-            const pipValueForChop = trade.pipValue || 0.0001;
-            const priceDiffForChop = isBuyForChop
-              ? currentPrice - (trade.actualEntryPrice || currentPrice)
-              : (trade.actualEntryPrice || currentPrice) - currentPrice;
-            const pipsProfitForChop = priceDiffForChop / pipValueForChop;
-            
-            // Only exit if choppy AND not meaningfully in profit
-            if (chopCheck.isChopping && pipsProfitForChop < 2) {
-              const exitLabel = pipsProfitForChop >= 0
-                ? `+${pipsProfitForChop.toFixed(1)} pips (stale trade — taking small profit/even)`
-                : `${pipsProfitForChop.toFixed(1)} pips (cutting stale loser)`;
-              console.log(`Chop exit: ${trade.symbol} after ${timeInTradeMinutes.toFixed(1)}min | ${exitLabel}`);
-              await this.closeFullTrade(trade, 'chop_exit');
-              continue;
+            const isChoppy = this.strategy.isChoppyByATR(candles5M.candles, 14, 50);
+            if (isChoppy) {
+              const isBuyForChop = trade.direction === 'BUY' || trade.direction === 'BULLISH';
+              const pipValueForChop = trade.pipValue || 0.0001;
+              const priceDiffForChop = isBuyForChop
+                ? currentPrice - (trade.actualEntryPrice || currentPrice)
+                : (trade.actualEntryPrice || currentPrice) - currentPrice;
+              const pipsProfitForChop = priceDiffForChop / pipValueForChop;
+              
+              // Only exit if choppy AND not in meaningful profit (< 5 pips)
+              if (pipsProfitForChop < 5) {
+                const exitLabel = pipsProfitForChop >= 0
+                  ? `+${pipsProfitForChop.toFixed(1)} pips (low volatility exit)`
+                  : `${pipsProfitForChop.toFixed(1)} pips (choppy market exit)`;
+                console.log(`ATR Chop exit: ${trade.symbol} after ${timeInTradeMinutes.toFixed(1)}min | ${exitLabel}`);
+                await this.closeFullTrade(trade, 'atr_chop_exit');
+                continue;
+              } else {
+                console.log(`Chop detected but ${trade.symbol} in profit (${pipsProfitForChop.toFixed(1)} pips) — trailing stop managing`);
+              }
             }
           }
         }
