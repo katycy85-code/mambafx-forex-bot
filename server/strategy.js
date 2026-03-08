@@ -449,7 +449,8 @@ export class MambafXStrategy {
     // Market is choppy if current ATR is below 60% of average
     return atrRatio < 0.6;
   }
-}  /**
+
+  /**
    * Detect choppy/sideways market (no clear direction)
    */
   detectChop(candles, lookback = 10) {
