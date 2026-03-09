@@ -1,8 +1,9 @@
 /**
- * Quick Scalp Strategy - Active Edition
+ * Quick Scalp Strategy - Tight TP Edition
  * High-frequency scalping strategy designed to trade multiple times per day
  * Uses RSI momentum + trend + price action - no strict crossover required
- * Risk: 15 pips Trailing SL, 25 pips TP (50% partial close)
+ * Risk: 15 pips Trailing SL (activates after +5 pips), 10 pips TP
+ * 1-Hour Breakeven Rule: close at market if within ±2 pips after 60 min
  * Position: 5% of account per trade
  */
 
@@ -10,12 +11,17 @@ export class QuickScalpStrategy {
   constructor(accountBalance) {
     this.accountBalance = accountBalance;
     this.positionSizePercent = 0.05; // 5% per trade for capital utilization
-    this.stopLossPips = 15;          // 15 pips SL (Trailing)
-    this.takeProfitPips = 25;        // 25 pips TP for 50% partial close
-    this.maxConcurrentTrades = 4;    // 4 concurrent trades to capitalize on multiple opportunities
+    this.stopLossPips = 15;          // 15 pips SL (Trailing, activates after +5 pips profit)
+    this.takeProfitPips = 10;        // 10 pips TP — realistic target reachable in FX
+    this.maxConcurrentTrades = 3;    // 3 concurrent trades (reduced from 4 for focus)
     this.rsiPeriod = 14;
     this.maPeriod = 20;
     this.fastMaPeriod = 8;
+    // Trailing stop activation: only start trailing after trade is +5 pips in profit
+    this.trailingStopActivationPips = 5;
+    // 1-Hour Breakeven Rule
+    this.breakevenCheckMinutes = 60;  // Check after 60 minutes
+    this.breakevenThresholdPips = 2;  // Close if within ±2 pips of entry
   }
 
   /**
@@ -206,12 +212,15 @@ export class QuickScalpStrategy {
    */
   getParameters() {
     return {
-      name: 'Quick Scalp (Active)',
-      description: 'High-frequency scalping - 3-of-4 conditions required',
+      name: 'Quick Scalp (Tight TP)',
+      description: 'High-frequency scalping - 10 pip TP, trailing stop activates after +5 pips, 1h breakeven rule',
       stopLossPips: this.stopLossPips,
       takeProfitPips: this.takeProfitPips,
       positionSizePercent: this.positionSizePercent * 100,
       maxConcurrentTrades: this.maxConcurrentTrades,
+      trailingStopActivationPips: this.trailingStopActivationPips,
+      breakevenCheckMinutes: this.breakevenCheckMinutes,
+      breakevenThresholdPips: this.breakevenThresholdPips,
       rsiPeriod: this.rsiPeriod,
       maPeriod: this.maPeriod,
     };

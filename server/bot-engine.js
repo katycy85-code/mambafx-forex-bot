@@ -30,18 +30,25 @@ export class BotEngine {
       // Trailing stop settings (in pips)
       trailingStopEnabled: true,
       trailingStopPips: 15,       // 15 pips trailing stop as requested
-      trailingStopActivationPips: 0, // Activate trailing stop immediately to lock in profit early
+      trailingStopActivationPips: 5, // Activate trailing stop only after +5 pips profit
       // News filter settings
       newsFilterEnabled: true,
       newsBlackoutMinutes: 30,    // 30 min before/after high-impact news
+      // 1-Hour Breakeven Rule: close trades within ±2 pips of entry after 60 min
+      breakevenCheckMinutes: 60,
+      breakevenThresholdPips: 2,
       ...config,
     };
     console.log('DEBUG: Final config.tradingPairs:', this.config.tradingPairs);
 
     this.strategy = new MambafXStrategy({
       minConfirmations: 3,
-      riskRewardRatio: 7,
+      riskRewardRatio: 2,           // Reduced from 7 — realistic for FX
       positionSizePercent: 25,
+      stopLossPips: 15,             // Reduced from 30
+      profitTarget1Ratio: 1,        // 1x risk = ~15 pips (was 3x = 90 pips)
+      profitTarget2Ratio: 1.5,      // 1.5x risk = ~22 pips (was 5x = 150 pips)
+      trailingStopPips: 10,         // Tighter trailing (was 20)
     });
 
     // Initialize Quick Scalp strategy
@@ -555,7 +562,7 @@ export class BotEngine {
         : 15;               // fallback
       const takeProfitPips = typeof signal.takeProfit === 'number' && signal.takeProfit < 200
         ? signal.takeProfit
-        : 25;
+        : 10;  // Default 10 pips TP (was 25 — too far for FX)
 
       // Fixed unit size: 2% of account * leverage / pip value
       // For a $199 account: 2% = $3.98 risk, 15-pip SL
@@ -610,22 +617,18 @@ export class BotEngine {
         try {
           const units = isBuy ? safeUnits : -safeUnits;
 
-          // Use trailing stop if enabled
-          // Use trailing stop if enabled (15 pips for Quick Scalp)
-          const trailingStopPips = this.config.trailingStopEnabled
-            ? 15
-            : null;
-
+          // Place with FIXED stop loss initially (not trailing)
+          // Trailing stop will be activated later after +5 pips profit
+          // This prevents getting stopped out on initial noise
           const result = await this.oanda.placeOrder(
             symbol,
             units,
             takeProfitPips,
             stopLossPips,
-            trailingStopPips
+            null  // No trailing stop on entry — activated later after +5 pips
           );
           order = { success: true, orderId: result.tradeId, ...result };
-          const trailingInfo = trailingStopPips ? ` | Trailing: ${trailingStopPips}pip` : '';
-          console.log(`✅ Trade placed on OANDA for ${symbol}: ${units} units at ${result.entryPrice}${trailingInfo}`);
+          console.log(`✅ Trade placed on OANDA for ${symbol}: ${units} units at ${result.entryPrice} | TP: ${takeProfitPips}pip | SL: ${stopLossPips}pip (fixed, trailing activates after +${this.config.trailingStopActivationPips}pip)`);
         } catch (error) {
           order = { success: false, error: error.message };
           console.error(`❌ Failed to place order on OANDA for ${symbol}:`, error.message);
@@ -672,7 +675,7 @@ export class BotEngine {
       // Add to open trades
       const actualEntryPrice = order.entryPrice || signal.entryPrice;
       const pipValue = symbol.includes('JPY') ? 0.01 : 0.0001;
-      const tpPips = takeProfitPips || 25;
+      const tpPips = takeProfitPips || 10;  // Default 10 pips (was 25)
       const isBuyTrade = isBuy;
       const tp25Price = isBuyTrade
         ? actualEntryPrice + (tpPips * pipValue)
@@ -689,6 +692,7 @@ export class BotEngine {
         profitTargets,
         partialClosedAt: [],
         openedAt: Date.now(),
+        trailingStopActivated: false,  // Will be set to true after +5 pips profit
       });
 
       // Send notification if Twilio is configured
@@ -737,49 +741,66 @@ export class BotEngine {
         if (!quote.success) continue;
 
         const currentPrice = (quote.bid + quote.ask) / 2;
-
-        // Check for chop/no volume exit (scalping exit condition)
         const timeInTrade = Date.now() - (trade.openedAt || Date.now());
         const timeInTradeMinutes = timeInTrade / (1000 * 60);
-        
-        // ATR-based chop detection: exit if market volatility drops significantly
-        // This prevents holding trades in low-volume, choppy conditions
-        if (timeInTradeMinutes >= 30) { // Check after 30 minutes minimum
+        const isBuyTrade = trade.direction === 'BUY' || trade.direction === 'BULLISH';
+        const pipValue = trade.pipValue || 0.0001;
+        const priceDiff = isBuyTrade
+          ? currentPrice - (trade.actualEntryPrice || currentPrice)
+          : (trade.actualEntryPrice || currentPrice) - currentPrice;
+        const pipsProfit = priceDiff / pipValue;
+
+        // ── TRAILING STOP ACTIVATION: Switch from fixed SL to trailing after +5 pips ──
+        const activationPips = this.config.trailingStopActivationPips || 5;
+        if (this.config.trailingStopEnabled && !trade.trailingStopActivated && pipsProfit >= activationPips) {
+          if (this.oanda && trade.orderId) {
+            try {
+              const trailPips = this.config.trailingStopPips || 15;
+              await this.oanda.updateTrailingStop(trade.orderId, trailPips, trade.symbol);
+              trade.trailingStopActivated = true;
+              console.log(`📍 ${trade.symbol}: Trailing stop ACTIVATED at ${trailPips} pips (profit: +${pipsProfit.toFixed(1)} pips)`);
+            } catch (err) {
+              console.error(`Failed to activate trailing stop for ${trade.symbol}:`, err.message);
+            }
+          }
+        }
+
+        // ── 1-HOUR BREAKEVEN RULE ──────────────────────────────────────────
+        // After 60 min, if trade is within ±2 pips of entry → close at market
+        const breakevenCheckMin = this.config.breakevenCheckMinutes || 60;
+        const breakevenThreshold = this.config.breakevenThresholdPips || 2;
+        if (timeInTradeMinutes >= breakevenCheckMin) {
+          const absPipsFromEntry = Math.abs(pipsProfit);
+          if (absPipsFromEntry <= breakevenThreshold) {
+            console.log(`⏰ 1H BREAKEVEN: ${trade.symbol} open ${timeInTradeMinutes.toFixed(0)}min | P&L: ${pipsProfit.toFixed(1)} pips (within ±${breakevenThreshold} pips) — closing at breakeven`);
+            await this.closeFullTrade(trade, 'breakeven_1h_rule');
+            continue;
+          }
+        }
+
+        // ── ATR CHOP DETECTION ──────────────────────────────────────────
+        if (timeInTradeMinutes >= 30) {
           const candles5M = await this.getCandles(trade.symbol, '5m', 50);
           if (candles5M.success) {
             const isChoppy = this.strategy.isChoppyByATR(candles5M.candles, 14, 50);
             if (isChoppy) {
-              const isBuyForChop = trade.direction === 'BUY' || trade.direction === 'BULLISH';
-              const pipValueForChop = trade.pipValue || 0.0001;
-              const priceDiffForChop = isBuyForChop
-                ? currentPrice - (trade.actualEntryPrice || currentPrice)
-                : (trade.actualEntryPrice || currentPrice) - currentPrice;
-              const pipsProfitForChop = priceDiffForChop / pipValueForChop;
-              
-              // Only exit if choppy AND not in meaningful profit (< 5 pips)
-              if (pipsProfitForChop < 5) {
-                const exitLabel = pipsProfitForChop >= 0
-                  ? `+${pipsProfitForChop.toFixed(1)} pips (low volatility exit)`
-                  : `${pipsProfitForChop.toFixed(1)} pips (choppy market exit)`;
+              if (pipsProfit < 5) {
+                const exitLabel = pipsProfit >= 0
+                  ? `+${pipsProfit.toFixed(1)} pips (low volatility exit)`
+                  : `${pipsProfit.toFixed(1)} pips (choppy market exit)`;
                 console.log(`ATR Chop exit: ${trade.symbol} after ${timeInTradeMinutes.toFixed(1)}min | ${exitLabel}`);
                 await this.closeFullTrade(trade, 'atr_chop_exit');
                 continue;
               } else {
-                console.log(`Chop detected but ${trade.symbol} in profit (${pipsProfitForChop.toFixed(1)} pips) — trailing stop managing`);
+                console.log(`Chop detected but ${trade.symbol} in profit (${pipsProfit.toFixed(1)} pips) — trailing stop managing`);
               }
             }
           }
         }
-        // ── MAX HOLD TIME: force-close stale trades after 4 hours ──────────
-        const maxHoldMinutes = this.config.maxHoldMinutes || 240; // 4 hours default
+
+        // ── MAX HOLD TIME: force-close stale trades after 2 hours ──────────
+        const maxHoldMinutes = this.config.maxHoldMinutes || 120; // 2 hours (was 4)
         if (timeInTradeMinutes >= maxHoldMinutes) {
-          const isBuy = trade.direction === 'BUY' || trade.direction === 'BULLISH';
-          const pipValue = trade.pipValue || 0.0001;
-          const priceDiff = isBuy
-            ? currentPrice - (trade.actualEntryPrice || currentPrice)
-            : (trade.actualEntryPrice || currentPrice) - currentPrice;
-          const pipsProfit = priceDiff / pipValue;
-          // Only force-close if not meaningfully in profit (< 5 pips)
           if (pipsProfit < 5) {
             console.log(`⏰ MAX HOLD: ${trade.symbol} open ${timeInTradeMinutes.toFixed(0)}min (>${maxHoldMinutes}min) | P&L: ${pipsProfit.toFixed(1)} pips — force closing`);
             await this.closeFullTrade(trade, 'max_hold_time');
@@ -790,20 +811,17 @@ export class BotEngine {
         }
 
         // ── PARTIAL CLOSE LOGIC ──────────────────────────────────────────
-        // At 25-pip target: close 50%, move stop to breakeven, let 50% run
-        const isBuyTrade = trade.direction === 'BUY' || trade.direction === 'BULLISH';
-
+        // At TP target: close 50%, move stop to breakeven, let 50% run
         if (trade.tp25Price && !trade.partialClosedAt.includes('tp25')) {
           const hitTP = isBuyTrade
             ? currentPrice >= trade.tp25Price
             : currentPrice <= trade.tp25Price;
 
           if (hitTP) {
-            console.log(`🎯 ${trade.symbol}: Hit 25-pip target at ${currentPrice.toFixed(5)} — closing 50%, moving stop to breakeven`);
+            console.log(`🎯 ${trade.symbol}: Hit TP target at ${currentPrice.toFixed(5)} — closing 50%, moving stop to breakeven`);
             const closed = await this.closePartialTrade(trade, 0.5, 'tp25');
             if (closed) {
               trade.partialClosedAt.push('tp25');
-              // Move trailing stop to breakeven on remaining 50%
               if (this.oanda && trade.orderId) {
                 try {
                   await this.oanda.moveStopToBreakeven(trade.orderId, trade.actualEntryPrice, trade.pipValue);
