@@ -1,7 +1,18 @@
 /**
- * MambafX Bot Engine
+ * MambafX Bot Engine v2
  * Main trading bot that executes trades based on strategy signals
- * Features: Quick Scalp + MambafX strategies, trailing stops, news filter
+ * 
+ * v2 Changes:
+ * - Proper 1:2 R:R (was 1:0.67)
+ * - Reduced pairs from 9 to 4 (focus on best liquidity)
+ * - Spread filter: skip if spread > 2 pips
+ * - ATR-based dynamic stop loss (not fixed)
+ * - Trailing stop activates at +10 pips (was +5), trails at 8 pips (was 15)
+ * - Removed premature breakeven/chop exits that locked in losses
+ * - Max hold increased to 4 hours
+ * - Smarter partial close: 50% at 1.5x risk, let rest run with trailing
+ * - Scan interval increased to 2 minutes (reduce noise)
+ * - Per-pair cooldown increased to 30 min after loss
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -17,107 +28,93 @@ export class BotEngine {
     console.log('DEBUG: BotEngine constructor received config:', JSON.stringify(config, null, 2));
     this.config = {
       tradingCapital: 100,
-      leverage: 25,
-      maxDailyLoss: 50,
+      leverage: 50,
+      maxDailyLoss: 10,           // 10% max daily loss (was 50% — way too high)
       maxDrawdown: 15,
-      botMode: 'full-auto', // manual, semi-auto, full-auto
-      // OANDA live account supports forex pairs only (no metals/commodities)
-      tradingPairs: ['EUR/USD', 'GBP/USD', 'AUD/USD', 'USD/JPY', 'NZD/USD', 'USD/CAD', 'GBP/JPY', 'EUR/GBP', 'USD/CHF'],
+      botMode: 'full-auto',
+      // REDUCED to 4 best pairs — tighter spreads, better liquidity
+      tradingPairs: ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD'],
       nyOpenHour: 6,
       nyOpenMinute: 30,
       nyCloseHour: 15,
       nyCloseMinute: 0,
-      // Trailing stop settings (in pips)
+      // Trailing stop settings
       trailingStopEnabled: true,
-      trailingStopPips: 15,       // 15 pips trailing stop as requested
-      trailingStopActivationPips: 5, // Activate trailing stop only after +5 pips profit
+      trailingStopPips: 8,              // Tighter trail (was 15)
+      trailingStopActivationPips: 10,   // Activate later (was 5) — let trades breathe
       // News filter settings
       newsFilterEnabled: true,
-      newsBlackoutMinutes: 30,    // 30 min before/after high-impact news
-      // 1-Hour Breakeven Rule: close trades within ±2 pips of entry after 60 min
-      breakevenCheckMinutes: 60,
-      breakevenThresholdPips: 2,
+      newsBlackoutMinutes: 30,
+      // Max hold time: 4 hours (was 2 — too short for 20-pip targets)
+      maxHoldMinutes: 240,
+      // Scan interval: 2 minutes (was 1 — reduce noise)
+      scanIntervalMs: 120000,
+      // Spread filter
+      maxSpreadPips: 2.0,
       ...config,
     };
     console.log('DEBUG: Final config.tradingPairs:', this.config.tradingPairs);
 
     this.strategy = new MambafXStrategy({
       minConfirmations: 3,
-      riskRewardRatio: 2,           // Reduced from 7 — realistic for FX
-      positionSizePercent: 25,
-      stopLossPips: 15,             // Reduced from 30
-      profitTarget1Ratio: 1,        // 1x risk = ~15 pips (was 3x = 90 pips)
-      profitTarget2Ratio: 1.5,      // 1.5x risk = ~22 pips (was 5x = 150 pips)
-      trailingStopPips: 10,         // Tighter trailing (was 20)
+      riskRewardRatio: 2,
+      positionSizePercent: 2,       // 2% risk per trade
+      stopLossPips: 12,
+      profitTarget1Ratio: 1.5,
+      profitTarget2Ratio: 2.5,
+      trailingStopPips: 8,
     });
 
-    // Initialize Quick Scalp strategy
+    // Initialize Quick Scalp strategy v2
     this.quickScalpStrategy = new QuickScalpStrategy(this.config.tradingCapital);
 
-    // Initialize OANDA API with hardcoded credentials
+    // Initialize OANDA API
     const oandaAccountId = process.env.OANDA_ACCOUNT_ID || '001-001-17887452-001';
     const oandaApiToken = process.env.OANDA_API_TOKEN || 'd1613cf312d0d35c93db8b37f2a1d48f-4cae4dcbb78257d569421fcfb4046bd0';
     const oandaApiUrl = process.env.OANDA_API_URL || 'https://api-fxtrade.oanda.com';
     
     if (oandaAccountId && oandaApiToken && oandaApiUrl) {
-      this.oanda = new OandaAPI(
-        oandaAccountId,
-        oandaApiToken,
-        oandaApiUrl
-      );
+      this.oanda = new OandaAPI(oandaAccountId, oandaApiToken, oandaApiUrl);
       console.log('✅ OANDA API initialized with live account');
     } else {
       this.oanda = null;
       console.log('⚠️  OANDA credentials not configured - using simulation mode');
     }
 
-    // Initialize news calendar (uses ForexFactory public feed - no API key needed)
+    // Initialize news calendar
     this.newsCalendar = new NewsCalendar();
     if (this.config.newsFilterEnabled && this.newsCalendar) {
       console.log(`✅ News filter enabled: ${this.config.newsBlackoutMinutes} min blackout window`);
-    } else {
-      console.log('ℹ️  News filter disabled');
     }
 
-    // Log trailing stop config
     if (this.config.trailingStopEnabled) {
-      console.log(`✅ Trailing stops enabled: ${this.config.trailingStopPips} pips (activates after ${this.config.trailingStopActivationPips || 8} pips profit)`);
+      console.log(`✅ Trailing stops enabled: ${this.config.trailingStopPips} pips (activates after ${this.config.trailingStopActivationPips} pips profit)`);
     }
 
-    // Twilio notifications DISABLED - set to null to prevent SMS charges
-    // To re-enable: remove the line below and uncomment the block
+    // Twilio notifications DISABLED
     this.notifications = null;
     console.log('ℹ️  Twilio notifications disabled (cost control)');
-    /* DISABLED - uncomment to re-enable Twilio
-    if (config.twilioAccountSid && config.twilioAuthToken && config.twilioPhoneNumber) {
-      this.notifications = new NotificationService(
-        config.twilioAccountSid,
-        config.twilioAuthToken,
-        config.twilioPhoneNumber
-      );
-    } else {
-      this.notifications = null;
-      console.log('ℹ️  Twilio not configured - SMS notifications disabled');
-    }
-    */
 
     this.userPhoneNumber = config.userPhoneNumber;
     this.isRunning = false;
     this.openTrades = [];
     this.dailyPnL = 0;
     this.accountBalance = this.config.tradingCapital;
-    // Per-pair cooldown: after a losing trade, wait 15 min before re-entering same pair
-    this.pairCooldowns = {}; // { 'EUR/USD': timestamp_when_cooldown_expires }
+    // Per-pair cooldown: 30 min after a losing trade (was 15)
+    this.pairCooldowns = {};
+    // Track daily trade count to prevent overtrading
+    this.dailyTradeCount = 0;
+    this.maxDailyTrades = 6; // Max 6 trades per day
+    this.lastDayReset = new Date().toDateString();
   }
 
   /**
    * Start the bot
    */
   async start() {
-    console.log('🤖 MambafX Bot Starting...');
+    console.log('🤖 MambafX Bot v2 Starting...');
     this.isRunning = true;
 
-    // Fetch real account balance from OANDA if connected
     if (this.oanda) {
       try {
         const accountDetails = await this.oanda.getAccountDetails();
@@ -125,17 +122,16 @@ export class BotEngine {
         console.log('💵 Account balance from OANDA: $' + this.accountBalance.toFixed(2));
       } catch (error) {
         console.error('⚠️  Could not fetch account balance from OANDA:', error.message);
-        console.log('Using default balance: $' + this.accountBalance);
       }
     }
 
-    // Sync open trades from OANDA on startup (restores state after redeploy)
+    // Sync open trades from OANDA on startup
     if (this.oanda) {
       try {
         const oandaTrades = await this.oanda.getOpenTrades();
         if (oandaTrades.length > 0) {
           this.openTrades = oandaTrades.map(t => ({
-            tradeId: t.id,   // Use OANDA's actual ID so updateOpenTradePnL() matches correctly
+            tradeId: t.id,
             orderId: t.id,
             symbol: t.pair.replace('_', '/'),
             direction: t.units > 0 ? 'BUY' : 'SELL',
@@ -146,32 +142,29 @@ export class BotEngine {
             positionSize: Math.abs(t.units),
             pipValue: t.pair.includes('JPY') ? 0.01 : 0.0001,
             tp25Price: t.units > 0
-              ? t.entryPrice + (25 * (t.pair.includes('JPY') ? 0.01 : 0.0001))
-              : t.entryPrice - (25 * (t.pair.includes('JPY') ? 0.01 : 0.0001)),
+              ? t.entryPrice + (20 * (t.pair.includes('JPY') ? 0.01 : 0.0001))
+              : t.entryPrice - (20 * (t.pair.includes('JPY') ? 0.01 : 0.0001)),
             partialClosedAt: [],
-            // Use actual OANDA openTime so max-hold-time check is accurate after redeploy
             openedAt: t.openTime ? new Date(t.openTime).getTime() : Date.now(),
             profitTargets: {},
           }));
-          console.log(`📂 Synced ${oandaTrades.length} open trade(s) from OANDA: ${this.openTrades.map(t => t.symbol).join(', ')}`);
+          console.log(`📂 Synced ${oandaTrades.length} open trade(s) from OANDA`);
 
-          // Save synced trades to database so the dashboard Trades tab shows them
           for (const trade of this.openTrades) {
             try {
               await db.saveTrade({
-                tradeId: trade.tradeId,  // This is now the OANDA trade ID
+                tradeId: trade.tradeId,
                 symbol: trade.symbol,
                 direction: trade.direction,
                 entryPrice: trade.entryPrice,
-                stopLoss: 15,
+                stopLoss: 12,
                 positionSize: trade.positionSize,
-                riskAmount: trade.positionSize * 0.0001 * 15,
+                riskAmount: trade.positionSize * 0.0001 * 12,
                 confirmationCount: 0,
                 confirmations: [],
                 status: 'OPEN',
               });
             } catch (err) {
-              // Ignore duplicate key errors (trade already in DB from previous run)
               if (!err.message?.includes('UNIQUE')) {
                 console.error(`Failed to save synced trade ${trade.symbol} to DB:`, err.message);
               }
@@ -183,44 +176,41 @@ export class BotEngine {
       } catch (error) {
         console.error('⚠️  Could not sync open trades from OANDA:', error.message);
       }
-      // Import historical closed trades from OANDA into DB (for Closed tab)
+
+      // Import historical closed trades
       try {
         const closedTrades = await this.oanda.getRecentClosedTrades(100);
         let imported = 0;
         for (const ct of closedTrades) {
           try {
-            // Save as a closed trade — ignore duplicates silently
             await db.saveClosedTrade({
               tradeId: `oanda-${ct.tradeId}`,
               symbol: ct.instrument,
               direction: ct.direction,
               entryPrice: ct.entryPrice,
               exitPrice: ct.exitPrice,
-              stopLoss: 15,
+              stopLoss: 12,
               positionSize: ct.units,
-              riskAmount: ct.units * 0.0001 * 15,
+              riskAmount: ct.units * 0.0001 * 12,
               profitLoss: ct.realizedPL,
               entryTime: ct.openTime ? new Date(ct.openTime).toISOString() : new Date().toISOString(),
               exitTime: ct.closeTime ? new Date(ct.closeTime).toISOString() : new Date().toISOString(),
             });
             imported++;
           } catch (err) {
-            if (!err.message?.includes('UNIQUE')) {
-              // Ignore duplicate key errors silently
-            }
+            // Ignore duplicates
           }
         }
         if (imported > 0) {
-          console.log(`📋 Imported ${imported} historical closed trade(s) from OANDA into DB`);
+          console.log(`📋 Imported ${imported} historical closed trade(s) from OANDA`);
         }
       } catch (err) {
         console.error('⚠️  Could not import closed trades from OANDA:', err.message);
       }
     }
-    // Save bot status
-    await db.saveBotSetting('botStatus', 'running');;
 
-    // Send start notification if Twilio is configured
+    await db.saveBotSetting('botStatus', 'running');
+
     if (this.notifications) {
       await this.notifications.notifyBotStatus(this.userPhoneNumber, {
         isRunning: true,
@@ -230,7 +220,6 @@ export class BotEngine {
       });
     }
 
-    // Start trading loop
     this.startTradingLoop();
   }
 
@@ -240,11 +229,8 @@ export class BotEngine {
   async stop() {
     console.log('🛑 MambafX Bot Stopping...');
     this.isRunning = false;
-
-    // Save bot status
     await db.saveBotSetting('botStatus', 'stopped');
 
-    // Send stop notification if Twilio is configured
     if (this.notifications) {
       await this.notifications.notifyBotStatus(this.userPhoneNumber, {
         isRunning: false,
@@ -256,22 +242,16 @@ export class BotEngine {
   }
 
   /**
-   * Main trading loop
-   */
-  /**
    * Handle trades before weekend close (Friday 4:30 PM EST)
-   * - Close losing/stale trades
-   * - Move SL to breakeven and take partial profit for winning trades
    */
   async handleWeekendTrades() {
     const now = new Date();
-    const dayOfWeek = now.getUTCDay(); // 0 = Sunday, 5 = Friday, 6 = Saturday
+    const dayOfWeek = now.getUTCDay();
     const utcHour = now.getUTCHours();
     const utcMinute = now.getUTCMinutes();
 
-    // Check if it's Friday and after 4:30 PM EST (20:30 UTC)
     if (dayOfWeek === 5 && (utcHour > 20 || (utcHour === 20 && utcMinute >= 30))) {
-      console.log('⏰ Friday 4:30 PM EST: Initiating Smart Weekend Management...');
+      console.log('⏰ Friday 4:30 PM EST: Initiating Weekend Management...');
 
       for (let i = this.openTrades.length - 1; i >= 0; i--) {
         const trade = this.openTrades[i];
@@ -285,25 +265,35 @@ export class BotEngine {
             : (trade.actualEntryPrice || currentPrice) - currentPrice;
           const pipsProfit = priceDiff / pipValue;
 
-          if (pipsProfit >= 10) { // Winning trade: > 10 pips profit
-            console.log(`✅ ${trade.symbol}: Profit > 10 pips (${pipsProfit.toFixed(1)} pips). Moving SL to breakeven and taking 50% partial profit.`);
-            // Move SL to breakeven
+          if (pipsProfit >= 10) {
+            console.log(`✅ ${trade.symbol}: +${pipsProfit.toFixed(1)} pips. Moving SL to breakeven, taking 50% profit.`);
             await this.oanda.moveStopToBreakeven(trade.tradeId, trade.actualEntryPrice, pipValue);
-            // Take 50% partial profit
             const unitsToClose = Math.floor(trade.remainingUnits / 2);
             if (unitsToClose > 0) {
               await this.oanda.closePartialTrade(trade.tradeId, unitsToClose);
               trade.remainingUnits -= unitsToClose;
-              console.log(`💰 ${trade.symbol}: Closed ${unitsToClose} units (50% partial profit).`);
             }
-          } else { // Losing or small profit trade: close it
-            console.log(`❌ ${trade.symbol}: Profit < 10 pips (${pipsProfit.toFixed(1)} pips). Closing trade.`);
+          } else {
+            console.log(`❌ ${trade.symbol}: ${pipsProfit.toFixed(1)} pips. Closing before weekend.`);
             await this.closeFullTrade(trade, 'weekend_close');
           }
         } catch (error) {
-          console.error(`Error during weekend trade management for ${trade.symbol}:`, error.message);
+          console.error(`Error during weekend management for ${trade.symbol}:`, error.message);
         }
       }
+    }
+  }
+
+  /**
+   * Reset daily counters at midnight
+   */
+  resetDailyCounters() {
+    const today = new Date().toDateString();
+    if (today !== this.lastDayReset) {
+      console.log(`📅 New trading day: resetting daily counters`);
+      this.dailyPnL = 0;
+      this.dailyTradeCount = 0;
+      this.lastDayReset = today;
     }
   }
 
@@ -313,28 +303,34 @@ export class BotEngine {
   async startTradingLoop() {
     while (this.isRunning) {
       try {
-        // Run weekend trade management first
+        this.resetDailyCounters();
         await this.handleWeekendTrades();
 
-        // Trade 24/7 (volume filter will prevent low-liquidity trades)
-        for (const pair of this.config.tradingPairs) {
-          await this.analyzeAndTrade(pair);
+        // Check daily loss limit before scanning
+        const dailyLossLimit = this.accountBalance * (this.config.maxDailyLoss / 100);
+        if (this.dailyPnL < -dailyLossLimit) {
+          console.log(`🛑 Daily loss limit reached ($${this.dailyPnL.toFixed(2)} < -$${dailyLossLimit.toFixed(2)}). Pausing new trades.`);
+        } else if (this.dailyTradeCount >= this.maxDailyTrades) {
+          console.log(`🛑 Max daily trades reached (${this.dailyTradeCount}/${this.maxDailyTrades}). Pausing new trades.`);
+        } else {
+          // Scan for new trades
+          for (const pair of this.config.tradingPairs) {
+            await this.analyzeAndTrade(pair);
+          }
         }
 
-        // Check open trades (trailing stop management + exit conditions)
+        // Always check open trades (trailing stop management + exit conditions)
         await this.checkOpenTrades();
 
         // Update account balance
         await this.updateAccountBalance();
 
-        // Sleep for 1 minute before next scan
-        await this.sleep(60000);
+        // Sleep for scan interval (2 minutes)
+        await this.sleep(this.config.scanIntervalMs || 120000);
       } catch (error) {
         console.error("Bot Error:", error);
         if (this.notifications) {
-          await this.notifications.notifyError(this.userPhoneNumber, {
-            message: error.message,
-          });
+          await this.notifications.notifyError(this.userPhoneNumber, { message: error.message });
         }
       }
     }
@@ -342,7 +338,6 @@ export class BotEngine {
 
   /**
    * Check if news filter blocks trading for this pair
-   * Returns { blocked: boolean, reason: string }
    */
   async checkNewsFilter(pair) {
     if (!this.config.newsFilterEnabled || !this.newsCalendar) {
@@ -358,7 +353,6 @@ export class BotEngine {
         return { blocked: true, reason: newsStatus.reason };
       }
     } catch (error) {
-      // If news check fails, allow trading (fail-open)
       console.warn(`⚠️  News filter check failed for ${pair}: ${error.message} - allowing trade`);
     }
 
@@ -375,17 +369,18 @@ export class BotEngine {
       try {
         const newsStatus = await this.newsCalendar.isNewsWindowActive(trade.symbol);
         if (newsStatus.active && newsStatus.timeUntil > 0) {
-          // News is upcoming (not past) - check if trade is profitable
           if (this.oanda) {
             const price = await this.oanda.getPrice(trade.symbol);
             const currentPrice = (price.bid + price.ask) / 2;
             const isBuy = trade.direction === 'BUY' || trade.direction === 'BULLISH';
-            const pnl = isBuy
-              ? (currentPrice - trade.entryPrice) * trade.positionSize
-              : (trade.entryPrice - currentPrice) * trade.positionSize;
+            const pipValue = trade.pipValue || 0.0001;
+            const priceDiff = isBuy
+              ? currentPrice - trade.entryPrice
+              : trade.entryPrice - currentPrice;
+            const pipsProfit = priceDiff / pipValue;
 
-            if (pnl > 0) {
-              console.log(`📰 Closing profitable ${trade.symbol} trade before news: ${newsStatus.event}`);
+            if (pipsProfit > 5) {
+              console.log(`📰 Closing profitable ${trade.symbol} (+${pipsProfit.toFixed(1)} pips) before news: ${newsStatus.event}`);
               await this.closeFullTrade(trade, 'news_close');
             }
           }
@@ -397,74 +392,86 @@ export class BotEngine {
   }
 
   /**
+   * Check spread before entering a trade
+   * Returns spread in pips, or null if can't determine
+   */
+  async checkSpread(symbol) {
+    if (!this.oanda) return null;
+    try {
+      const price = await this.oanda.getPrice(symbol);
+      const pipValue = symbol.includes('JPY') ? 0.01 : 0.0001;
+      const spreadPips = (price.ask - price.bid) / pipValue;
+      return spreadPips;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
    * Analyze pair and execute trade if signal found
    */
   async analyzeAndTrade(symbol) {
     try {
-      console.log(`🔍 Scanning ${symbol}...`);
-      // Check news filter before analyzing
+      // Check news filter
       const newsCheck = await this.checkNewsFilter(symbol);
-      if (newsCheck.blocked) {
-        return; // Skip this pair during news window
-      }
+      if (newsCheck.blocked) return;
 
-      // Check per-pair cooldown (15 min after a losing trade)
+      // Check per-pair cooldown (30 min after a losing trade)
       const cooldownExpiry = this.pairCooldowns[symbol];
       if (cooldownExpiry && Date.now() < cooldownExpiry) {
         const minsLeft = Math.ceil((cooldownExpiry - Date.now()) / 60000);
-        console.log(`⏳ ${symbol} in cooldown — ${minsLeft}min remaining after last loss`);
+        console.log(`⏳ ${symbol} in cooldown — ${minsLeft}min remaining`);
         return;
       }
 
-      // Get 5M candles for both strategies
+      // Check spread before analyzing (save API calls if spread is too wide)
+      const spreadPips = await this.checkSpread(symbol);
+      if (spreadPips !== null && spreadPips > (this.config.maxSpreadPips || 2.0)) {
+        console.log(`💸 ${symbol} spread too wide: ${spreadPips.toFixed(1)} pips (max: ${this.config.maxSpreadPips})`);
+        return;
+      }
+
+      // Skip if already have open trade for this symbol
+      if (this.openTrades.find(t => t.symbol === symbol)) {
+        return; // Silently skip
+      }
+
+      // Get candles for analysis
       const candles5M = await this.getCandles(symbol, '5m', 100);
-      const candles15M = await this.getCandles(symbol, '15m', 50);
+      const candles15M = await this.getCandles(symbol, '15m', 60);
 
       if (!candles5M.success || !candles15M.success) {
-        console.log(`Failed to get candles for ${symbol}`);
         return;
       }
 
-      // Count open trades for this symbol
       const openTradesForSymbol = this.openTrades.filter(t => t.symbol === symbol).length;
 
-      // Strategy 1: MambafX (high quality, fewer trades)
+      // Strategy 1: MambafX (higher timeframe, fewer but better trades)
       const bias = this.strategy.analyzeBias(candles15M.candles);
-      const shouldSkip = this.strategy.shouldSkipTrade(
-        candles15M.candles,
-        candles5M.candles,
-        bias
-      );
+      const shouldSkip = this.strategy.shouldSkipTrade(candles15M.candles, candles5M.candles, bias);
 
       if (!shouldSkip.skip) {
-        const mambafxSignal = this.strategy.generateEntrySignal(
-          candles15M.candles,
-          candles5M.candles,
-          bias
-        );
+        const mambafxSignal = this.strategy.generateEntrySignal(candles15M.candles, candles5M.candles, bias);
 
         if (mambafxSignal.signal === 'ENTRY') {
-          console.log(`[MambafX] ${symbol}: ${mambafxSignal.direction} signal`);
+          console.log(`[MambafX] ${symbol}: ${mambafxSignal.direction} signal (${mambafxSignal.confirmationCount} confirmations)`);
           await this.handleEntrySignal(symbol, { ...mambafxSignal, strategy: 'MambafX' });
-          return; // Execute MambafX if signal found
+          return;
         }
       }
 
-      // Strategy 2: Quick Scalp (high frequency, small wins)
+      // Strategy 2: Quick Scalp v2 (stricter than v1)
       if (openTradesForSymbol < this.quickScalpStrategy.maxConcurrentTrades) {
-        const quickScalpSignal = this.quickScalpStrategy.analyzeSignal(
-          candles5M.candles,
-          openTradesForSymbol
-        );
+        const quickScalpSignal = this.quickScalpStrategy.analyzeSignal(candles5M.candles, openTradesForSymbol);
 
         if (quickScalpSignal.signal !== 'NONE') {
-          console.log(`[Quick Scalp] ${symbol}: ${quickScalpSignal.signal} - ${quickScalpSignal.reason}`);
+          console.log(`[Quick Scalp v2] ${symbol}: ${quickScalpSignal.signal} - ${quickScalpSignal.reason}`);
           const tradeSignal = {
             signal: 'ENTRY',
             direction: quickScalpSignal.signal === 'BUY' ? 1 : -1,
             entryPrice: candles5M.candles[candles5M.candles.length - 1].close,
-            stopLoss: this.quickScalpStrategy.stopLossPips,
-            takeProfit: this.quickScalpStrategy.takeProfitPips,
+            stopLoss: quickScalpSignal.stopLoss || this.quickScalpStrategy.stopLossPips,
+            takeProfit: quickScalpSignal.takeProfit || this.quickScalpStrategy.takeProfitPips,
             strategy: 'QuickScalp',
             reason: quickScalpSignal.reason,
           };
@@ -482,57 +489,50 @@ export class BotEngine {
   async handleEntrySignal(symbol, signal) {
     // Check if we already have open trade for this symbol
     if (this.openTrades.find(t => t.symbol === symbol)) {
-      console.log(`Already have open trade for ${symbol}`);
       return;
     }
 
     // Check daily loss limit
-    if (this.dailyPnL < -(this.accountBalance * this.config.maxDailyLoss / 100)) {
+    const dailyLossLimit = this.accountBalance * (this.config.maxDailyLoss / 100);
+    if (this.dailyPnL < -dailyLossLimit) {
       console.log('Daily loss limit reached, skipping trade');
       return;
     }
 
+    // Check daily trade count
+    if (this.dailyTradeCount >= this.maxDailyTrades) {
+      console.log(`Max daily trades reached (${this.dailyTradeCount}/${this.maxDailyTrades})`);
+      return;
+    }
+
     if (this.config.botMode === 'manual') {
-      // Send notification and wait for approval
       if (this.notifications) {
         await this.notifications.notifyEntrySignal(this.userPhoneNumber, {
           symbol,
           direction: signal.direction,
           entryPrice: signal.entryPrice,
           stopLoss: signal.stopLoss,
-          riskRewardRatio: signal.riskRewardRatio || this.config.leverage,
+          riskRewardRatio: signal.riskRewardRatio || 2,
           confirmationCount: signal.confirmationCount,
         });
       }
-
-      // Store pending trade for manual approval
       await db.saveBotSetting(`pending_trade_${symbol}`, JSON.stringify(signal));
     } else if (this.config.botMode === 'semi-auto') {
-      // Execute first trade automatically
-      const openTradeCount = this.openTrades.length;
-      if (openTradeCount === 0) {
+      if (this.openTrades.length === 0) {
         await this.executeTrade(symbol, signal);
-      } else {
-        // Send notification for additional trades
-        if (this.notifications) {
-          await this.notifications.notifyEntrySignal(this.userPhoneNumber, {
-            symbol,
-            direction: signal.direction,
-            entryPrice: signal.entryPrice,
-            stopLoss: signal.stopLoss,
-            riskRewardRatio: signal.riskRewardRatio || this.config.leverage,
-            confirmationCount: signal.confirmationCount,
-          });
-        }
+      } else if (this.notifications) {
+        await this.notifications.notifyEntrySignal(this.userPhoneNumber, {
+          symbol,
+          direction: signal.direction,
+          entryPrice: signal.entryPrice,
+          stopLoss: signal.stopLoss,
+        });
       }
     } else if (this.config.botMode === 'full-auto') {
-      // Check global max concurrent trades before executing
-      const maxTrades = this.quickScalpStrategy?.maxConcurrentTrades || 3;
+      const maxTrades = this.quickScalpStrategy?.maxConcurrentTrades || 2;
       if (this.openTrades.length >= maxTrades) {
-        // Silently skip - don't log every scan to avoid spam
         return;
       }
-      // Execute trade automatically
       await this.executeTrade(symbol, signal);
     }
   }
@@ -542,56 +542,45 @@ export class BotEngine {
    */
   async executeTrade(symbol, signal) {
     try {
-      // tradeId will be replaced with OANDA's actual trade ID after order fill
-      // so that updateOpenTradePnL() can match by tradeId correctly
-      let tradeId = uuidv4(); // temporary, overwritten below if OANDA order succeeds
+      let tradeId = uuidv4();
 
-      // Determine direction: support both numeric (1/-1) and string ('BUY'/'SELL'/'BULLISH'/'BEARISH')
       const isBuy = signal.direction === 1 ||
         signal.direction === 'BUY' ||
         signal.direction === 'BULLISH';
 
-      // Calculate position size in OANDA units
-      // Use simple fixed-fraction sizing: risk 2% of account per trade
-      // OANDA minimum is 1 unit; standard lot = 100,000 units
-      // With $199 account and 50x leverage: usable margin = ~$9,950
-      // Risk 2% = ~$4 per trade; at 15-pip SL on EUR/USD (~$1.50/pip for 1000 units)
-      // => trade ~2,500 units per trade (safe for small account)
+      // Use signal's dynamic SL/TP (ATR-based from strategy)
       const stopLossPips = typeof signal.stopLoss === 'number' && signal.stopLoss < 100
-        ? signal.stopLoss   // already in pips (e.g. 15)
-        : 15;               // fallback
+        ? signal.stopLoss
+        : 12;
       const takeProfitPips = typeof signal.takeProfit === 'number' && signal.takeProfit < 200
         ? signal.takeProfit
-        : 10;  // Default 10 pips TP (was 25 — too far for FX)
+        : stopLossPips * 2; // Always maintain 1:2 R:R
 
-      // Fixed unit size: 2% of account * leverage / pip value
-      // For a $199 account: 2% = $3.98 risk, 15-pip SL
-      // pip value for 1000 units of EUR/USD ≈ $0.10/pip → need ~$3.98/($0.10*15) = 2,653 units
+      // Position sizing: risk 2% of account per trade
       const riskDollars = this.accountBalance * 0.02;
-      const pipValuePer1000Units = symbol.includes('JPY') ? 0.0076 : 0.10; // approx USD per pip per 1000 units
+      const pipValuePer1000Units = symbol.includes('JPY') ? 0.0076 : 0.10;
       const rawUnits = (riskDollars / (stopLossPips * pipValuePer1000Units)) * 1000;
-      let safeUnits = Math.max(1000, Math.min(Math.floor(rawUnits), 50000)); // clamp 1000–50000
+      let safeUnits = Math.max(1000, Math.min(Math.floor(rawUnits), 30000)); // Reduced max from 50k to 30k
 
-      // MARGIN-AWARE CHECK: Reduce units if margin exceeds 30% of balance
+      // Margin check
       let accountDetails = { marginAvailable: this.accountBalance };
       if (this.oanda) {
         try {
           accountDetails = await this.oanda.getAccountDetails();
         } catch (error) {
-          // Continue with default if fetch fails
+          // Continue with default
         }
       }
 
-      // Estimate margin: 1% of notional value for 100:1 leverage
       const currentPrice = signal.entryPrice || 1.0;
       const notionalValue = (safeUnits / 1000) * currentPrice * 1000;
       const estimatedMarginRequired = notionalValue * 0.01;
-      const maxMarginPerTrade = this.accountBalance * 0.30;
+      const maxMarginPerTrade = this.accountBalance * 0.25; // 25% max margin per trade (was 30%)
 
       if (estimatedMarginRequired > maxMarginPerTrade) {
         const maxUnitsForMargin = Math.floor((maxMarginPerTrade / 0.01) / currentPrice * 1000);
-        safeUnits = Math.max(1000, Math.min(maxUnitsForMargin, 50000));
-        console.log(`⚠️  Margin cap applied for ${symbol}: margin $${estimatedMarginRequired.toFixed(2)} exceeds limit`);
+        safeUnits = Math.max(1000, Math.min(maxUnitsForMargin, 30000));
+        console.log(`⚠️  Margin cap applied for ${symbol}`);
       }
 
       if (accountDetails.marginAvailable < estimatedMarginRequired) {
@@ -607,7 +596,7 @@ export class BotEngine {
       // Calculate profit targets
       const profitTargets = this.strategy.calculateProfitTargets(
         signal.entryPrice,
-        signal.stopLoss,
+        stopLossPips,
         signal.direction
       );
 
@@ -617,40 +606,31 @@ export class BotEngine {
         try {
           const units = isBuy ? safeUnits : -safeUnits;
 
-          // Place with FIXED stop loss initially (not trailing)
-          // Trailing stop will be activated later after +5 pips profit
-          // This prevents getting stopped out on initial noise
+          // Place with FIXED stop loss initially
+          // Trailing stop activated later after +10 pips profit
           const result = await this.oanda.placeOrder(
             symbol,
             units,
             takeProfitPips,
             stopLossPips,
-            null  // No trailing stop on entry — activated later after +5 pips
+            null  // No trailing stop on entry
           );
           order = { success: true, orderId: result.tradeId, ...result };
-          console.log(`✅ Trade placed on OANDA for ${symbol}: ${units} units at ${result.entryPrice} | TP: ${takeProfitPips}pip | SL: ${stopLossPips}pip (fixed, trailing activates after +${this.config.trailingStopActivationPips}pip)`);
+          console.log(`✅ Trade placed: ${symbol} ${isBuy ? 'BUY' : 'SELL'} ${units} units | SL: ${stopLossPips}pip | TP: ${takeProfitPips}pip (1:${(takeProfitPips/stopLossPips).toFixed(1)} R:R)`);
         } catch (error) {
           order = { success: false, error: error.message };
-          console.error(`❌ Failed to place order on OANDA for ${symbol}:`, error.message);
+          console.error(`❌ Failed to place order for ${symbol}:`, error.message);
         }
       } else {
-        // Simulation mode
         order = { success: true, orderId: tradeId };
         console.log(`📊 SIMULATION: Trade placed for ${symbol}`);
       }
 
       if (!order.success) {
         console.error(`Failed to place order for ${symbol}:`, order.error);
-        if (this.notifications) {
-          await this.notifications.notifyError(this.userPhoneNumber, {
-            symbol,
-            message: `Failed to place order: ${order.error}`,
-          });
-        }
         return;
       }
 
-      // Use OANDA's actual trade ID so P&L updates match via updateOpenTradePnL()
       if (order.orderId) {
         tradeId = order.orderId;
       }
@@ -661,13 +641,13 @@ export class BotEngine {
         symbol,
         direction: isBuy ? 'BUY' : 'SELL',
         entryPrice: signal.entryPrice,
-        stopLoss: signal.stopLoss,
+        stopLoss: stopLossPips,
         positionSize: positionSizing.positionSize,
         riskAmount: positionSizing.riskAmount,
         confirmationCount: signal.confirmationCount,
         confirmations: signal.confirmations || [],
-        entryTime: new Date().toISOString(),  // explicit UTC ISO string
-        trailingStopPips: this.config.trailingStopPips || 20,
+        entryTime: new Date().toISOString(),
+        trailingStopPips: this.config.trailingStopPips || 8,
       };
 
       await db.saveTrade(trade);
@@ -675,11 +655,15 @@ export class BotEngine {
       // Add to open trades
       const actualEntryPrice = order.entryPrice || signal.entryPrice;
       const pipValue = symbol.includes('JPY') ? 0.01 : 0.0001;
-      const tpPips = takeProfitPips || 10;  // Default 10 pips (was 25)
-      const isBuyTrade = isBuy;
-      const tp25Price = isBuyTrade
+      const tpPips = takeProfitPips;
+      const tp25Price = isBuy
         ? actualEntryPrice + (tpPips * pipValue)
         : actualEntryPrice - (tpPips * pipValue);
+
+      // Partial close target: at 1.5x risk (not full TP)
+      const partialClosePrice = isBuy
+        ? actualEntryPrice + (stopLossPips * 1.5 * pipValue)
+        : actualEntryPrice - (stopLossPips * 1.5 * pipValue);
 
       this.openTrades.push({
         ...trade,
@@ -687,48 +671,52 @@ export class BotEngine {
         actualEntryPrice,
         totalUnits: safeUnits,
         remainingUnits: safeUnits,
-        tp25Price,           // price level for 50% close
+        tp25Price: partialClosePrice,  // Partial close at 1.5x risk
         pipValue,
         profitTargets,
         partialClosedAt: [],
         openedAt: Date.now(),
-        trailingStopActivated: false,  // Will be set to true after +5 pips profit
+        trailingStopActivated: false,
+        stopLossPips,
+        takeProfitPips,
       });
 
-      // Send notification if Twilio is configured
+      // Increment daily trade count
+      this.dailyTradeCount++;
+
       if (this.notifications) {
         await this.notifications.notifyTradeOpened(this.userPhoneNumber, {
           symbol,
           direction: isBuy ? 'BUY' : 'SELL',
           entryPrice: signal.entryPrice,
-          stopLoss: signal.stopLoss,
+          stopLoss: stopLossPips,
           riskAmount: positionSizing.riskAmount,
           positionSize: positionSizing.positionSize,
         });
       }
 
-      console.log(`✅ Trade opened: ${symbol} ${isBuy ? 'BUY' : 'SELL'}`);
+      console.log(`✅ Trade opened: ${symbol} ${isBuy ? 'BUY' : 'SELL'} | Daily trades: ${this.dailyTradeCount}/${this.maxDailyTrades}`);
     } catch (error) {
       console.error('Error executing trade:', error);
-      if (this.notifications) {
-        await this.notifications.notifyError(this.userPhoneNumber, {
-          symbol,
-          message: `Trade execution error: ${error.message}`,
-        });
-      }
     }
   }
 
   /**
    * Check open trades and manage exits
+   * 
+   * v2 changes:
+   * - Removed 1-hour breakeven rule (was closing trades prematurely)
+   * - Removed ATR chop exit (trailing stop handles this)
+   * - Max hold increased to 4 hours
+   * - Trailing stop activates at +10 pips (was +5)
+   * - Partial close at 1.5x risk (not full TP)
    */
   async checkOpenTrades() {
-    // First: close profitable trades before upcoming news
+    // Close profitable trades before upcoming news
     await this.closeTradesBeforeNews();
 
     for (const trade of this.openTrades) {
       try {
-        // Get current price from OANDA
         let quote = { success: false };
         if (this.oanda) {
           try {
@@ -750,12 +738,12 @@ export class BotEngine {
           : (trade.actualEntryPrice || currentPrice) - currentPrice;
         const pipsProfit = priceDiff / pipValue;
 
-        // ── TRAILING STOP ACTIVATION: Switch from fixed SL to trailing after +5 pips ──
-        const activationPips = this.config.trailingStopActivationPips || 5;
+        // ── TRAILING STOP ACTIVATION: after +10 pips profit ──────────
+        const activationPips = this.config.trailingStopActivationPips || 10;
         if (this.config.trailingStopEnabled && !trade.trailingStopActivated && pipsProfit >= activationPips) {
           if (this.oanda && trade.orderId) {
             try {
-              const trailPips = this.config.trailingStopPips || 15;
+              const trailPips = this.config.trailingStopPips || 8;
               await this.oanda.updateTrailingStop(trade.orderId, trailPips, trade.symbol);
               trade.trailingStopActivated = true;
               console.log(`📍 ${trade.symbol}: Trailing stop ACTIVATED at ${trailPips} pips (profit: +${pipsProfit.toFixed(1)} pips)`);
@@ -765,67 +753,44 @@ export class BotEngine {
           }
         }
 
-        // ── 1-HOUR BREAKEVEN RULE ──────────────────────────────────────────
-        // After 60 min, if trade is within ±2 pips of entry → close at market
-        const breakevenCheckMin = this.config.breakevenCheckMinutes || 60;
-        const breakevenThreshold = this.config.breakevenThresholdPips || 2;
-        if (timeInTradeMinutes >= breakevenCheckMin) {
-          const absPipsFromEntry = Math.abs(pipsProfit);
-          if (absPipsFromEntry <= breakevenThreshold) {
-            console.log(`⏰ 1H BREAKEVEN: ${trade.symbol} open ${timeInTradeMinutes.toFixed(0)}min | P&L: ${pipsProfit.toFixed(1)} pips (within ±${breakevenThreshold} pips) — closing at breakeven`);
-            await this.closeFullTrade(trade, 'breakeven_1h_rule');
-            continue;
-          }
-        }
-
-        // ── ATR CHOP DETECTION ──────────────────────────────────────────
-        if (timeInTradeMinutes >= 30) {
-          const candles5M = await this.getCandles(trade.symbol, '5m', 50);
-          if (candles5M.success) {
-            const isChoppy = this.strategy.isChoppyByATR(candles5M.candles, 14, 50);
-            if (isChoppy) {
-              if (pipsProfit < 5) {
-                const exitLabel = pipsProfit >= 0
-                  ? `+${pipsProfit.toFixed(1)} pips (low volatility exit)`
-                  : `${pipsProfit.toFixed(1)} pips (choppy market exit)`;
-                console.log(`ATR Chop exit: ${trade.symbol} after ${timeInTradeMinutes.toFixed(1)}min | ${exitLabel}`);
-                await this.closeFullTrade(trade, 'atr_chop_exit');
-                continue;
-              } else {
-                console.log(`Chop detected but ${trade.symbol} in profit (${pipsProfit.toFixed(1)} pips) — trailing stop managing`);
-              }
-            }
-          }
-        }
-
-        // ── MAX HOLD TIME: force-close stale trades after 2 hours ──────────
-        const maxHoldMinutes = this.config.maxHoldMinutes || 120; // 2 hours (was 4)
+        // ── MAX HOLD TIME: force-close after 4 hours ─────────────────
+        const maxHoldMinutes = this.config.maxHoldMinutes || 240;
         if (timeInTradeMinutes >= maxHoldMinutes) {
-          if (pipsProfit < 5) {
-            console.log(`⏰ MAX HOLD: ${trade.symbol} open ${timeInTradeMinutes.toFixed(0)}min (>${maxHoldMinutes}min) | P&L: ${pipsProfit.toFixed(1)} pips — force closing`);
-            await this.closeFullTrade(trade, 'max_hold_time');
+          if (pipsProfit > 3) {
+            // In profit — close with whatever we have
+            console.log(`⏰ MAX HOLD: ${trade.symbol} open ${timeInTradeMinutes.toFixed(0)}min | +${pipsProfit.toFixed(1)} pips — closing with profit`);
+            await this.closeFullTrade(trade, 'max_hold_profit');
+            continue;
+          } else if (pipsProfit > -3) {
+            // Near breakeven — close to free up capital
+            console.log(`⏰ MAX HOLD: ${trade.symbol} open ${timeInTradeMinutes.toFixed(0)}min | ${pipsProfit.toFixed(1)} pips — closing near breakeven`);
+            await this.closeFullTrade(trade, 'max_hold_breakeven');
             continue;
           } else {
-            console.log(`⏰ MAX HOLD: ${trade.symbol} open ${timeInTradeMinutes.toFixed(0)}min but in profit (${pipsProfit.toFixed(1)} pips) — letting trailing stop manage`);
+            // In loss — let stop loss handle it (don't force close at a loss)
+            console.log(`⏰ MAX HOLD: ${trade.symbol} open ${timeInTradeMinutes.toFixed(0)}min | ${pipsProfit.toFixed(1)} pips — letting SL manage`);
           }
         }
 
-        // ── PARTIAL CLOSE LOGIC ──────────────────────────────────────────
-        // At TP target: close 50%, move stop to breakeven, let 50% run
+        // ── PARTIAL CLOSE at 1.5x risk: close 50%, move stop to breakeven ──
         if (trade.tp25Price && !trade.partialClosedAt.includes('tp25')) {
           const hitTP = isBuyTrade
             ? currentPrice >= trade.tp25Price
             : currentPrice <= trade.tp25Price;
 
           if (hitTP) {
-            console.log(`🎯 ${trade.symbol}: Hit TP target at ${currentPrice.toFixed(5)} — closing 50%, moving stop to breakeven`);
+            console.log(`🎯 ${trade.symbol}: Hit 1.5x risk target at ${currentPrice.toFixed(5)} — closing 50%, moving stop to breakeven`);
             const closed = await this.closePartialTrade(trade, 0.5, 'tp25');
             if (closed) {
               trade.partialClosedAt.push('tp25');
               if (this.oanda && trade.orderId) {
                 try {
-                  await this.oanda.moveStopToBreakeven(trade.orderId, trade.actualEntryPrice, trade.pipValue);
-                  console.log(`🔒 ${trade.symbol}: Stop moved to breakeven at ${trade.actualEntryPrice.toFixed(5)}`);
+                  // Move stop to entry + 1 pip (small buffer for spread)
+                  const bePrice = isBuyTrade
+                    ? trade.actualEntryPrice + (1 * pipValue)
+                    : trade.actualEntryPrice - (1 * pipValue);
+                  await this.oanda.moveStopToBreakeven(trade.orderId, bePrice, trade.pipValue);
+                  console.log(`🔒 ${trade.symbol}: Stop moved to breakeven+1pip at ${bePrice.toFixed(5)}`);
                 } catch (err) {
                   console.error(`Failed to move stop to breakeven for ${trade.symbol}:`, err.message);
                 }
@@ -840,11 +805,10 @@ export class BotEngine {
   }
 
   /**
-   * Close full trade (for chop exit or other reasons)
+   * Close full trade
    */
   async closeFullTrade(trade, reason = 'manual') {
     try {
-      // Close order on OANDA
       let result = { success: false };
       if (this.oanda) {
         try {
@@ -861,7 +825,6 @@ export class BotEngine {
         const pnl = result.pnl || 0;
         console.log(`✅ Full close: ${trade.symbol} (${reason}) | P&L: $${pnl.toFixed(2)}`);
         
-        // Save closed trade to database
         try {
           await db.closeTrade(trade.tradeId, exitPrice, pnl);
           this.dailyPnL += pnl;
@@ -869,14 +832,13 @@ export class BotEngine {
           console.error(`Failed to save closed trade ${trade.symbol} to DB:`, dbErr.message);
         }
 
-        // Remove from open trades
         this.openTrades = this.openTrades.filter(t => t.tradeId !== trade.tradeId);
 
-        // Set 15-minute cooldown on this pair if trade closed at a loss
+        // Set 30-minute cooldown on this pair if trade closed at a loss
         if (pnl < 0) {
-          const cooldownMs = 15 * 60 * 1000; // 15 minutes
+          const cooldownMs = 30 * 60 * 1000; // 30 minutes (was 15)
           this.pairCooldowns[trade.symbol] = Date.now() + cooldownMs;
-          console.log(`⏳ ${trade.symbol} cooldown set — 15min before re-entry (loss: $${pnl.toFixed(2)})`);
+          console.log(`⏳ ${trade.symbol} cooldown set — 30min before re-entry (loss: $${pnl.toFixed(2)})`);
         }
       }
     } catch (error) {
@@ -885,14 +847,12 @@ export class BotEngine {
   }
 
   /**
-   * Close partial trade - closes a percentage of the remaining units
-   * Returns true if successful
+   * Close partial trade
    */
   async closePartialTrade(trade, percentage, targetName) {
     try {
       const unitsToClose = Math.floor((trade.remainingUnits || trade.totalUnits || trade.positionSize) * percentage);
       if (unitsToClose < 1) {
-        console.log(`Skipping partial close for ${trade.symbol} - units too small`);
         return false;
       }
 
@@ -906,16 +866,12 @@ export class BotEngine {
           return false;
         }
       } else {
-        // Simulation
         success = true;
       }
 
       if (success) {
-        // Update remaining units on the trade object
         trade.remainingUnits = (trade.remainingUnits || trade.totalUnits) - unitsToClose;
-        console.log(
-          `✅ Partial close: ${trade.symbol} ${targetName} — closed ${unitsToClose} units (${percentage * 100}%), ${trade.remainingUnits} units still running`
-        );
+        console.log(`✅ Partial close: ${trade.symbol} ${targetName} — closed ${unitsToClose} units (${percentage * 100}%), ${trade.remainingUnits} remaining`);
       }
       return success;
     } catch (error) {
@@ -930,14 +886,11 @@ export class BotEngine {
   isNYTradingHours() {
     const now = new Date();
     const nyTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-
     const hour = nyTime.getHours();
     const minute = nyTime.getMinutes();
-
     const openTime = this.config.nyOpenHour * 60 + this.config.nyOpenMinute;
     const closeTime = this.config.nyCloseHour * 60 + this.config.nyCloseMinute;
     const currentTime = hour * 60 + minute;
-
     return currentTime >= openTime && currentTime < closeTime;
   }
 
@@ -947,11 +900,9 @@ export class BotEngine {
   async getCandles(symbol, timeframe, limit) {
     try {
       if (!this.oanda) {
-        console.log(`⚠️  OANDA not configured - cannot fetch real candles for ${symbol}`);
         return { success: false, candles: [] };
       }
 
-      // Convert timeframe format: '5m' -> 'M5', '15m' -> 'M15', '4h' -> 'H4'
       let granularity = timeframe.toUpperCase();
       if (granularity.match(/^\d+M$/)) {
         granularity = 'M' + granularity.replace('M', '');
@@ -978,7 +929,6 @@ export class BotEngine {
    */
   async updateAccountBalance() {
     try {
-      // Get balance from OANDA
       let balance = { success: false };
       if (this.oanda) {
         try {
@@ -995,9 +945,8 @@ export class BotEngine {
         }
       }
 
-       if (balance.success) {
+      if (balance.success) {
         this.accountBalance = balance.balance;
-        // Save to history
         await db.saveAccountHistory({
           balance: balance.balance,
           equity: balance.equity,
@@ -1006,15 +955,12 @@ export class BotEngine {
           dailyPnL: this.dailyPnL,
         });
 
-        // Update unrealized P&L and reconcile closed trades
         try {
           const oandaTrades = await this.oanda.getOpenTrades();
           const oandaTradeIds = new Set(oandaTrades.map(t => t.id));
 
-          // Update P&L for still-open trades
           for (const oandaTrade of oandaTrades) {
             await db.updateOpenTradePnL(oandaTrade.id, oandaTrade.unrealizedPL, oandaTrade.currentPrice);
-            // Store last known P&L on in-memory trade for reconciliation
             const memTrade = this.openTrades.find(t => t.orderId === oandaTrade.id);
             if (memTrade) {
               memTrade.lastUnrealizedPL = oandaTrade.unrealizedPL;
@@ -1022,31 +968,33 @@ export class BotEngine {
             }
           }
 
-          // Reconcile: find trades in our memory that OANDA has already closed (trailing stop, TP, etc.)
+          // Reconcile: find trades closed by OANDA (trailing stop, TP, SL)
           const closedByOanda = this.openTrades.filter(t => t.orderId && !oandaTradeIds.has(t.orderId));
           for (const closedTrade of closedByOanda) {
-            console.log(`📋 ${closedTrade.symbol}: Closed by OANDA (trailing stop/TP) — recording to DB`);
+            console.log(`📋 ${closedTrade.symbol}: Closed by OANDA (trailing stop/TP/SL) — recording to DB`);
             try {
-              // We don't have the exact exit price, use last known price from P&L
               const pnl = closedTrade.lastUnrealizedPL || 0;
               await db.closeTrade(closedTrade.tradeId, closedTrade.lastPrice || closedTrade.actualEntryPrice || 0, pnl);
               this.dailyPnL += pnl;
+
+              // Set cooldown if loss
+              if (pnl < 0) {
+                const cooldownMs = 30 * 60 * 1000;
+                this.pairCooldowns[closedTrade.symbol] = Date.now() + cooldownMs;
+              }
             } catch (dbErr) {
               console.error(`Failed to record OANDA-closed trade ${closedTrade.symbol}:`, dbErr.message);
             }
-            // Remove from in-memory list
             this.openTrades = this.openTrades.filter(t => t.tradeId !== closedTrade.tradeId);
           }
 
-          // Also reconcile DB: mark any DB-open trades not in OANDA as closed
+          // Reconcile DB
           try {
             const dbOpenTrades = await db.getOpenTrades();
             for (const dbTrade of dbOpenTrades) {
               if (!oandaTradeIds.has(dbTrade.tradeId)) {
-                // Check if it's in our memory (might be a synced trade without orderId)
                 const inMemory = this.openTrades.find(t => t.tradeId === dbTrade.tradeId);
                 if (!inMemory) {
-                  // Trade is in DB as OPEN but not in OANDA and not in memory — mark closed
                   await db.closeTrade(dbTrade.tradeId, dbTrade.entryPrice, dbTrade.profitLoss || 0);
                   console.log(`🔄 Reconciled stale DB trade: ${dbTrade.symbol} marked CLOSED`);
                 }
@@ -1056,7 +1004,7 @@ export class BotEngine {
             // Non-critical
           }
         } catch (err) {
-          // Non-critical - don't crash the balance update if P&L sync fails
+          // Non-critical
         }
       }
     } catch (error) {
@@ -1080,6 +1028,8 @@ export class BotEngine {
       accountBalance: this.accountBalance,
       openTrades: this.openTrades.length,
       dailyPnL: this.dailyPnL,
+      dailyTradeCount: this.dailyTradeCount,
+      maxDailyTrades: this.maxDailyTrades,
       botMode: this.config.botMode,
       tradingPairs: this.config.tradingPairs,
       trailingStopEnabled: this.config.trailingStopEnabled,

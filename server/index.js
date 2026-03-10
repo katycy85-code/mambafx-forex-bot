@@ -32,26 +32,30 @@ const PORT = process.env.PORT || 3000;
 
 // Log strategy configuration
 function logStrategyConfig(botConfig) {
-  console.log('\n=== MAMBAFX STRATEGY CONFIGURATION ===');
+  console.log('\n=== MAMBAFX STRATEGY v2 CONFIGURATION ===');
   console.log('Trading Pairs:', botConfig.tradingPairs.join(', '));
   console.log('Trading Capital: $' + botConfig.tradingCapital);
   console.log('Leverage: ' + botConfig.leverage + 'x');
   console.log('Bot Mode:', botConfig.botMode);
-  console.log('\n=== STRATEGY SETTINGS ===');
+  console.log('\n=== STRATEGY SETTINGS (v2) ===');
   console.log('Timeframes: 15M (bias) + 5M (entry)');
-  console.log('Volume Filter: 20% above average');
-  console.log('Min Confirmations: 3');
-  console.log('Risk/Reward Ratio: 1:7');
-  console.log('Position Size: 25% of capital');
-  console.log('Chop Exit: After 10 minutes if choppy');
-  console.log('Trading Mode: 24/7 (with volume filter)');
-  console.log('\n=== ENABLED FEATURES ===');
-  console.log('✓ Volume filtering');
-  console.log('✓ Chop detection');
-  console.log('✓ 24/7 trading (forex + gold)');
-  console.log('✓ Scalping optimized (5M/15M)');
-  console.log('✓ Partial profit taking');
-  console.log('=====================================\n');
+  console.log('Risk/Reward: 1:2 (dynamic ATR-based)');
+  console.log('Position Size: 2% risk per trade');
+  console.log('Max Daily Trades: 6');
+  console.log('Max Concurrent: 2');
+  console.log('Scan Interval: 2 minutes');
+  console.log('Trailing Stop: 8 pips (activates at +10 pips)');
+  console.log('Max Spread: 2 pips');
+  console.log('\n=== ENTRY FILTERS ===');
+  console.log('✓ ADX > 20 (trending market only)');
+  console.log('✓ EMA-50 trend alignment');
+  console.log('✓ RSI pullback zones');
+  console.log('✓ Price action (engulfing/pin bar)');
+  console.log('✓ Volume surge confirmation');
+  console.log('✓ Spread filter (< 2 pips)');
+  console.log('✓ News blackout (30 min)');
+  console.log('✓ Per-pair cooldown (30 min after loss)');
+  console.log('==========================================\n');
 }
 // Middleware
 app.use(cors());
@@ -80,7 +84,7 @@ async function initializeServer() {
 
     // Initialize bot engine - Twilio is optional
     // OANDA live account supports forex pairs only (no metals/commodities like XAU/USD or WTI Oil)
-    const defaultPairs = 'EUR/USD,GBP/USD,AUD/USD,USD/JPY,NZD/USD,USD/CAD,GBP/JPY,EUR/GBP,USD/CHF';
+    const defaultPairs = 'EUR/USD,GBP/USD,USD/JPY,AUD/USD';
     const tradingPairsEnv = process.env.TRADING_PAIRS || defaultPairs;
     const botConfig = {
       tradingCapital: parseInt(process.env.TRADING_CAPITAL || '100'),
