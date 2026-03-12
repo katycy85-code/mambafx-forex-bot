@@ -405,7 +405,7 @@ export class QuickScalpStrategy {
       if (buyScore >= 6) {
         return {
           signal: 'BUY',
-          reason: `BUY: ${buyReasons.join(', ')} [score: ${buyScore}]`,
+          reason: `BUY: ${buyReasons.join(", ")} | RSI: ${rsi.toFixed(1)} | ADX: ${adxData.adx.toFixed(1)} (${adxData.direction}) | Score: ${buyScore}`,
           rsi,
           adx: adxData.adx,
           score: buyScore,
@@ -473,7 +473,7 @@ export class QuickScalpStrategy {
       if (sellScore >= 6) {
         return {
           signal: 'SELL',
-          reason: `SELL: ${sellReasons.join(', ')} [score: ${sellScore}]`,
+          reason: `SELL: ${sellReasons.join(", ")} | RSI: ${rsi.toFixed(1)} | ADX: ${adxData.adx.toFixed(1)} (${adxData.direction}) | Score: ${sellScore}`,
           rsi,
           adx: adxData.adx,
           score: sellScore,
