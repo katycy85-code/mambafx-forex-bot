@@ -227,6 +227,58 @@ export class QuickScalpStrategy {
   }
 
   /**
+   * Find swing highs or lows (local extremes)
+   */
+  findSwingPoints(candles, type = 'high', lookback = 3) {
+    const points = [];
+    for (let i = lookback; i < candles.length - lookback; i++) {
+      let isSwing = true;
+      for (let j = 1; j <= lookback; j++) {
+        if (type === 'high') {
+          if (candles[i].high <= candles[i - j].high || candles[i].high <= candles[i + j].high) {
+            isSwing = false;
+            break;
+          }
+        } else {
+          if (candles[i].low >= candles[i - j].low || candles[i].low >= candles[i + j].low) {
+            isSwing = false;
+            break;
+          }
+        }
+      }
+      if (isSwing) {
+        points.push(type === 'high' ? candles[i].high : candles[i].low);
+      }
+    }
+    return points;
+  }
+
+  /**
+   * Detect support and resistance levels using swing points
+   */
+  detectSupportResistance(candles, lookback = 30) {
+    const recent = candles.slice(-lookback);
+    const currentPrice = recent[recent.length - 1].close;
+
+    const swingHighs = this.findSwingPoints(recent, 'high', 2);
+    const swingLows = this.findSwingPoints(recent, 'low', 2);
+
+    // Nearest resistance above current price
+    const resistance = swingHighs.filter(h => h > currentPrice);
+    const nearestResistance = resistance.length > 0 ? Math.min(...resistance) : null;
+
+    // Nearest support below current price
+    const support = swingLows.filter(l => l < currentPrice);
+    const nearestSupport = support.length > 0 ? Math.max(...support) : null;
+
+    return {
+      support: nearestSupport || Math.min(...recent.map(c => c.low)),
+      resistance: nearestResistance || Math.max(...recent.map(c => c.high)),
+      currentPrice,
+    };
+  }
+
+  /**
    * Main signal generation — MUCH stricter than v1
    * 
    * Entry conditions (ALL must be true):
@@ -275,6 +327,11 @@ export class QuickScalpStrategy {
       return { signal: 'NONE', reason: `Volatility too high (ATR: ${atrPips.toFixed(1)} pips) — possible news` };
     }
 
+    // ── SUPPORT/RESISTANCE ──────────────────────────────────────────
+    const { support, resistance } = this.detectSupportResistance(candles);
+    const isNearSupport = support && (currentPrice - support) / pipValue < 5; // Within 5 pips
+    const isNearResistance = resistance && (resistance - currentPrice) / pipValue < 5; // Within 5 pips
+
     // ── PRICE ACTION PATTERNS ───────────────────────────────────────
     const engulfing = this.detectEngulfing(candles);
     const pinBar = this.detectPinBar(candles);
@@ -308,13 +365,19 @@ export class QuickScalpStrategy {
         buyReasons.push(`RSI neutral (${rsi.toFixed(1)})`);
       }
 
-      // Condition B: ADX direction confirms uptrend
+      // Condition B: Price near support
+      if (isNearSupport) {
+        buyScore += 2;
+        buyReasons.push(`Price near support (${support.toFixed(5)})`);
+      }
+
+      // Condition C: ADX direction confirms uptrend
       if (adxData.direction === 'UP') {
         buyScore += 2;
         buyReasons.push(`ADX UP (${adxData.adx.toFixed(1)})`);
       }
 
-      // Condition C: Bullish price action
+      // Condition D: Bullish price action
       if (engulfing === 'BULLISH_ENGULFING') {
         buyScore += 2;
         buyReasons.push('Bullish engulfing');
@@ -326,20 +389,20 @@ export class QuickScalpStrategy {
         buyReasons.push(`${bullishCount}/4 bullish candles`);
       }
 
-      // Condition D: Volume confirmation
+      // Condition E: Volume confirmation
       if (volumeSurge) {
         buyScore += 1;
         buyReasons.push('Volume surge');
       }
 
-      // Condition E: Strong trend (ADX > 30)
+      // Condition F: Strong trend (ADX > 30)
       if (adxData.strongTrend) {
         buyScore += 1;
         buyReasons.push('Strong trend');
       }
 
-      // Need score >= 5 to enter (strict)
-      if (buyScore >= 5) {
+      // Need score >= 6 to enter (stricter entry)
+      if (buyScore >= 6) {
         return {
           signal: 'BUY',
           reason: `BUY: ${buyReasons.join(', ')} [score: ${buyScore}]`,
@@ -370,13 +433,19 @@ export class QuickScalpStrategy {
         sellReasons.push(`RSI neutral (${rsi.toFixed(1)})`);
       }
 
-      // Condition B: ADX direction confirms downtrend
+      // Condition B: Price near resistance
+      if (isNearResistance) {
+        sellScore += 2;
+        sellReasons.push(`Price near resistance (${resistance.toFixed(5)})`);
+      }
+
+      // Condition C: ADX direction confirms downtrend
       if (adxData.direction === 'DOWN') {
         sellScore += 2;
         sellReasons.push(`ADX DOWN (${adxData.adx.toFixed(1)})`);
       }
 
-      // Condition C: Bearish price action
+      // Condition D: Bearish price action
       if (engulfing === 'BEARISH_ENGULFING') {
         sellScore += 2;
         sellReasons.push('Bearish engulfing');
@@ -388,20 +457,20 @@ export class QuickScalpStrategy {
         sellReasons.push(`${bearishCount}/4 bearish candles`);
       }
 
-      // Condition D: Volume confirmation
+      // Condition E: Volume confirmation
       if (volumeSurge) {
         sellScore += 1;
         sellReasons.push('Volume surge');
       }
 
-      // Condition E: Strong trend (ADX > 30)
+      // Condition F: Strong trend (ADX > 30)
       if (adxData.strongTrend) {
         sellScore += 1;
         sellReasons.push('Strong trend');
       }
 
-      // Need score >= 5 to enter (strict)
-      if (sellScore >= 5) {
+      // Need score >= 6 to enter (stricter entry)
+      if (sellScore >= 6) {
         return {
           signal: 'SELL',
           reason: `SELL: ${sellReasons.join(', ')} [score: ${sellScore}]`,

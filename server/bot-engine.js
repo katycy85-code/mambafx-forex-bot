@@ -50,7 +50,7 @@ export class BotEngine {
       // Scan interval: 2 minutes (was 1 — reduce noise)
       scanIntervalMs: 120000,
       // Spread filter
-      maxSpreadPips: 2.0,
+      maxSpreadPips: 1.5, // Reduced from 2.0 to 1.5 for stricter filtering
       ...config,
     };
     console.log('DEBUG: Final config.tradingPairs:', this.config.tradingPairs);
@@ -141,12 +141,9 @@ export class BotEngine {
             remainingUnits: Math.abs(t.units),
             positionSize: Math.abs(t.units),
             pipValue: t.pair.includes('JPY') ? 0.01 : 0.0001,
-            tp25Price: t.units > 0
-              ? t.entryPrice + (20 * (t.pair.includes('JPY') ? 0.01 : 0.0001))
-              : t.entryPrice - (20 * (t.pair.includes('JPY') ? 0.01 : 0.0001)),
+
             partialClosedAt: [],
             openedAt: t.openTime ? new Date(t.openTime).getTime() : Date.now(),
-            profitTargets: {},
           }));
           console.log(`📂 Synced ${oandaTrades.length} open trade(s) from OANDA`);
 
@@ -656,24 +653,14 @@ export class BotEngine {
       const actualEntryPrice = order.entryPrice || signal.entryPrice;
       const pipValue = symbol.includes('JPY') ? 0.01 : 0.0001;
       const tpPips = takeProfitPips;
-      const tp25Price = isBuy
-        ? actualEntryPrice + (tpPips * pipValue)
-        : actualEntryPrice - (tpPips * pipValue);
-
-      // Partial close target: at 1.5x risk (not full TP)
-      const partialClosePrice = isBuy
-        ? actualEntryPrice + (stopLossPips * 1.5 * pipValue)
-        : actualEntryPrice - (stopLossPips * 1.5 * pipValue);
-
       this.openTrades.push({
         ...trade,
         orderId: order.orderId,
         actualEntryPrice,
         totalUnits: safeUnits,
         remainingUnits: safeUnits,
-        tp25Price: partialClosePrice,  // Partial close at 1.5x risk
         pipValue,
-        profitTargets,
+
         partialClosedAt: [],
         openedAt: Date.now(),
         trailingStopActivated: false,
@@ -772,32 +759,7 @@ export class BotEngine {
           }
         }
 
-        // ── PARTIAL CLOSE at 1.5x risk: close 50%, move stop to breakeven ──
-        if (trade.tp25Price && !trade.partialClosedAt.includes('tp25')) {
-          const hitTP = isBuyTrade
-            ? currentPrice >= trade.tp25Price
-            : currentPrice <= trade.tp25Price;
 
-          if (hitTP) {
-            console.log(`🎯 ${trade.symbol}: Hit 1.5x risk target at ${currentPrice.toFixed(5)} — closing 50%, moving stop to breakeven`);
-            const closed = await this.closePartialTrade(trade, 0.5, 'tp25');
-            if (closed) {
-              trade.partialClosedAt.push('tp25');
-              if (this.oanda && trade.orderId) {
-                try {
-                  // Move stop to entry + 1 pip (small buffer for spread)
-                  const bePrice = isBuyTrade
-                    ? trade.actualEntryPrice + (1 * pipValue)
-                    : trade.actualEntryPrice - (1 * pipValue);
-                  await this.oanda.moveStopToBreakeven(trade.orderId, bePrice, trade.pipValue);
-                  console.log(`🔒 ${trade.symbol}: Stop moved to breakeven+1pip at ${bePrice.toFixed(5)}`);
-                } catch (err) {
-                  console.error(`Failed to move stop to breakeven for ${trade.symbol}:`, err.message);
-                }
-              }
-            }
-          }
-        }
       } catch (error) {
         console.error(`Error checking trade ${trade.tradeId}:`, error);
       }
