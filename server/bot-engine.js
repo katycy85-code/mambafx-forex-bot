@@ -50,7 +50,7 @@ export class BotEngine {
       // Scan interval: 2 minutes (was 1 — reduce noise)
       scanIntervalMs: 120000,
       // Spread filter
-      maxSpreadPips: 1.5, // Reduced from 2.0 to 1.5 for stricter filtering
+      maxSpreadPips: 2.0, // Set to 2.0 pips — realistic for Oanda live account (1.5 was too tight, blocking all trades)
       ...config,
     };
     console.log('DEBUG: Final config.tradingPairs:', this.config.tradingPairs);
