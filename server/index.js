@@ -116,16 +116,14 @@ async function initializeServer() {
       console.log(`ℹ️  Bot mode is "${botConfig.botMode}" - use /api/bot/start to begin trading`);
     }
 
-    // Initialize covered calls engine
-    coveredCallsEngine = new CoveredCallsEngine();
-    console.log('✅ Covered Calls Engine initialized');
-
-    // Schedule hourly scans
-    setInterval(async () => {
-      console.log('📊 Running scheduled covered calls scan...');
-      await coveredCallsEngine.runFullScan();
-      console.log(coveredCallsEngine.formatResults());
-    }, 3600000); // Every hour
+    // NOTE: CoveredCallsEngine is disabled to prevent Robinhood API errors
+    // coveredCallsEngine = new CoveredCallsEngine();
+    // console.log("✅ Covered Calls Engine initialized");
+    // setInterval(async () => {
+    //   console.log("📊 Running scheduled covered calls scan...");
+    //   await coveredCallsEngine.runFullScan();
+    //   console.log(coveredCallsEngine.formatResults());
+    // }, 3600000);
   } catch (error) {
     console.error('Server initialization error:', error);
     process.exit(1);

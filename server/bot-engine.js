@@ -50,7 +50,18 @@ export class BotEngine {
       // Scan interval: 2 minutes (was 1 — reduce noise)
       scanIntervalMs: 120000,
       // Spread filter
-      maxSpreadPips: 2.0, // Set to 2.0 pips — realistic for Oanda live account (1.5 was too tight, blocking all trades)
+      maxSpreadPips: {
+        default: 3.0, // Default for pairs not specified
+        'EUR/USD': 2.0,
+        'GBP/USD': 2.5,
+        'AUD/USD': 2.5,
+        'USD/JPY': 2.5,
+        'NZD/USD': 3.0,
+        'USD/CAD': 3.0,
+        'GBP/JPY': 4.5, // Higher spread for volatile pairs
+        'EUR/GBP': 3.0,
+        'USD/CHF': 3.0,
+      },
       ...config,
     };
     console.log('DEBUG: Final config.tradingPairs:', this.config.tradingPairs);
@@ -423,9 +434,15 @@ export class BotEngine {
 
       // Check spread before analyzing (save API calls if spread is too wide)
       const spreadPips = await this.checkSpread(symbol);
-      if (spreadPips !== null && spreadPips > (this.config.maxSpreadPips || 2.0)) {
-        console.log(`💸 ${symbol} spread too wide: ${spreadPips.toFixed(1)} pips (max: ${this.config.maxSpreadPips})`);
-        return;
+      if (spreadPips !== null) {
+        const maxSpread = typeof this.config.maxSpreadPips === 'object'
+          ? this.config.maxSpreadPips[symbol] || this.config.maxSpreadPips.default
+          : this.config.maxSpreadPips;
+
+        if (spreadPips > maxSpread) {
+          console.log(`💸 ${symbol} spread too wide: ${spreadPips.toFixed(1)} pips (max: ${maxSpread})`);
+          return;
+        }
       }
 
       // Skip if already have open trade for this symbol
