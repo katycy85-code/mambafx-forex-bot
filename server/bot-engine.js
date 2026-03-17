@@ -84,7 +84,9 @@ export class BotEngine {
     const oandaApiToken = process.env.OANDA_API_TOKEN || 'd1613cf312d0d35c93db8b37f2a1d48f-4cae4dcbb78257d569421fcfb4046bd0';
     const oandaApiUrl = process.env.OANDA_API_URL || 'https://api-fxtrade.oanda.com';
     
-    if (oandaAccountId && oandaApiToken && oandaApiUrl) {
+          const { TRADOVATE_USERNAME, TRADOVATE_PASSWORD, TRADOVATE_CID, TRADOVATE_SECRET, TRADOVATE_DEVICE_ID } = process.env;
+
+      if (TRADOVATE_USERNAME && TRADOVATE_PASSWORD && TRADOVATE_CID && TRADOVATE_SECRET && TRADOVATE_DEVICE_ID) {
       this.tradovate = new TradovateAPI({
         username: process.env.TRADOVATE_USERNAME,
         password: process.env.TRADOVATE_PASSWORD,
@@ -93,10 +95,10 @@ export class BotEngine {
         deviceId: process.env.TRADOVATE_DEVICE_ID,
         apiUrl: process.env.TRADOVATE_API_URL || 'https://demo.tradovateapi.com',
       });
-      console.log('✅ OANDA API initialized with live account');
+      console.log('✅ Tradovate API initialized');
     } else {
-      this.oanda = null;
-      console.log('⚠️  OANDA credentials not configured - using simulation mode');
+      this.tradovate = null;
+      console.log('⚠️  Tradovate credentials not configured - running in simulation mode');
     }
 
     // Initialize news calendar
