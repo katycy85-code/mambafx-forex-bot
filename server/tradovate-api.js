@@ -1,4 +1,4 @@
-const fetch = require("node-fetch");
+import fetch from "node-fetch";
 
 class TradovateAPI {
   constructor(config) {
@@ -53,4 +53,4 @@ class TradovateAPI {
   }
 }
 
-module.exports = TradovateAPI;
+export default TradovateAPI;
