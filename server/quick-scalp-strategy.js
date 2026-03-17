@@ -14,19 +14,17 @@
 export class QuickScalpStrategy {
   constructor(accountBalance) {
     this.accountBalance = accountBalance;
-    this.positionSizePercent = 0.02; // 2% risk per trade (conservative)
-    this.stopLossPips = 10;          // Tighter SL
-    this.takeProfitPips = 20;        // 2:1 R:R — the key fix
-    this.maxConcurrentTrades = 2;    // Focus on fewer, better trades
+    this.positionSizePercent = 0.02; // 2% risk per trade
+    this.stopLossTicks = 40; // 10 points on MNQ (10 * 4 ticks/point)
+    this.takeProfitTicks = 80; // 20 points on MNQ (20 * 4 ticks/point)
+    this.maxConcurrentTrades = 2;
     this.rsiPeriod = 14;
-    this.emaPeriod = 50;             // EMA-50 for trend filter
-    this.fastEmaPeriod = 9;          // EMA-9 for signal
+    this.emaPeriod = 50;
+    this.fastEmaPeriod = 9;
     this.adxPeriod = 14;
-    // Trailing stop: activate after +10 pips, trail at 8 pips
-    this.trailingStopActivationPips = 10;
-    this.trailingStopPips = 8;
-    // Max spread allowed (in pips) — skip trade if spread is wider
-    this.maxSpreadPips = 2.0;
+    this.trailingStopActivationTicks = 40;
+    this.trailingStopTicks = 32;
+    this.maxSpreadTicks = 8; // 2 points on MNQ (2 * 4 ticks/point)
   }
 
   /**
@@ -291,6 +289,25 @@ export class QuickScalpStrategy {
   analyzeSignal(candles, openTrades = 0) {
     if (candles.length < 60) {
       return { signal: 'NONE', reason: 'Insufficient data (need 60+ candles)' };
+    }
+
+        const now = new Date();
+    const hour = now.getUTCHours();
+    const day = now.getUTCDay();
+
+    const isNYSession = (hour >= 13 && hour <= 17 && day >= 1 && day <= 5); // 9:30 AM - 1:30 PM EST (approx)
+    const isAsiaSession = (hour >= 0 && hour <= 2); // 8 PM - 10 PM EST (approx)
+
+    const symbol = candles[0].symbol; // Assuming symbol is available in candle data
+
+    if (symbol.includes('MNQ') || symbol.includes('MYM')) {
+      if (!isNYSession) {
+        return { signal: 'NONE', reason: 'Outside NY session for indices' };
+      }
+    } else if (symbol.includes('MGC')) {
+      if (!isAsiaSession) {
+        return { signal: 'NONE', reason: 'Outside Asia session for Gold' };
+      }
     }
 
     if (openTrades >= this.maxConcurrentTrades) {

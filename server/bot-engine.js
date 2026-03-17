@@ -19,7 +19,7 @@ import { v4 as uuidv4 } from 'uuid';
 import MambafXStrategy from './strategy.js';
 import { QuickScalpStrategy } from './quick-scalp-strategy.js';
 import NotificationService from './notifications.js';
-import OandaAPI from './oanda-api.js';
+import TradovateAPI from './tradovate-api.js';
 import { NewsCalendar } from './news-calendar.js';
 import * as db from './db.js';
 
@@ -85,7 +85,14 @@ export class BotEngine {
     const oandaApiUrl = process.env.OANDA_API_URL || 'https://api-fxtrade.oanda.com';
     
     if (oandaAccountId && oandaApiToken && oandaApiUrl) {
-      this.oanda = new OandaAPI(oandaAccountId, oandaApiToken, oandaApiUrl);
+      this.tradovate = new TradovateAPI({
+        username: process.env.TRADOVATE_USERNAME,
+        password: process.env.TRADOVATE_PASSWORD,
+        cid: process.env.TRADOVATE_CID,
+        sec: process.env.TRADOVATE_SECRET,
+        deviceId: process.env.TRADOVATE_DEVICE_ID,
+        apiUrl: process.env.TRADOVATE_API_URL || 'https://demo.tradovateapi.com',
+      });
       console.log('✅ OANDA API initialized with live account');
     } else {
       this.oanda = null;
@@ -115,7 +122,9 @@ export class BotEngine {
     this.pairCooldowns = {};
     // Track daily trade count to prevent overtrading
     this.dailyTradeCount = 0;
-    this.maxDailyTrades = 6; // Max 6 trades per day
+    this.maxSessionTrades = 3; // Max 3 trades per session
+    this.sessionTradeCount = 0;
+    this.currentSession = null; // Can be 'NY', 'Asia', or null
     this.lastDayReset = new Date().toDateString();
   }
 
